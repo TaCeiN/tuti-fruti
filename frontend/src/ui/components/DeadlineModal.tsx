@@ -48,8 +48,8 @@ export default function DeadlineModal({ open, onClose, onConfirm, initialDeadlin
     const dayNum = parseInt(day, 10)
     const monthNum = parseInt(month, 10)
     const yearNum = parseInt(year, 10)
-    const hourNum = parseInt(hour, 10)
-    const minuteNum = parseInt(minute, 10)
+    const hourNum = parseInt(hour || '0', 10)
+    const minuteNum = parseInt(minute || '0', 10)
 
     if (isNaN(dayNum) || isNaN(monthNum) || isNaN(yearNum) || isNaN(hourNum) || isNaN(minuteNum)) {
       setError('Неверный формат данных')
@@ -151,7 +151,7 @@ export default function DeadlineModal({ open, onClose, onConfirm, initialDeadlin
             <input
               type="number"
               value={hour}
-              onChange={(e) => setHour(e.target.value.padStart(2, '0'))}
+              onChange={(e) => setHour(e.target.value)}
               placeholder="ЧЧ"
               min="0"
               max="23"
@@ -161,7 +161,7 @@ export default function DeadlineModal({ open, onClose, onConfirm, initialDeadlin
             <input
               type="number"
               value={minute}
-              onChange={(e) => setMinute(e.target.value.padStart(2, '0'))}
+              onChange={(e) => setMinute(e.target.value)}
               placeholder="ММ"
               min="0"
               max="59"

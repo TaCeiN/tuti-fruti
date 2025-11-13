@@ -615,12 +615,18 @@ export default function Dashboard() {
       )}
 
       {/* Thin Scenario Pill - всегда видимый, статичная позиция */}
-      <div 
-        ref={scenarioPillRef} 
-        className={`pill--scenario ${favoriteDeadline && favoriteDeadline.notification_enabled ? 'pill--scenario--active' : ''}`}
-      >
-        {favoriteDeadline && favoriteDeadline.notification_enabled ? 'Уведомления включены' : 'Уведомления выключены'}
-      </div>
+      {(() => {
+        // Проверяем, есть ли хотя бы одна заметка с включенными уведомлениями
+        const hasAnyNotifications = allNotes?.some(note => note.has_deadline_notifications === true) || false
+        return (
+          <div 
+            ref={scenarioPillRef} 
+            className={`pill--scenario ${hasAnyNotifications ? 'pill--scenario--active' : ''}`}
+          >
+            {hasAnyNotifications ? 'Уведомления включены' : 'Уведомления выключены'}
+          </div>
+        )
+      })()}
 
       {/* Calendar Popup */}
       <CalendarPopup open={showCalendar} onClose={() => setShowCalendar(false)} />
