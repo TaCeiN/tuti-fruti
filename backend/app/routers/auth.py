@@ -178,13 +178,15 @@ def auth_webapp(body: WebAppInit, db: Session = Depends(get_db)):
     # Решение: сделать несколько попыток с небольшой задержкой, чтобы дать webhook-серверу время.
     
     existing = None
-    for attempt in range(5):  # 5 попыток
+    max_search_attempts = 10  # Увеличено до 10 попыток (всего до 5 секунд ожидания)
+    for attempt in range(max_search_attempts):
         existing = db.query(User).filter(User.uuid == uuid).first()
         if existing:
-            logger.info(f"✅ User found on attempt {attempt + 1}")
+            logger.info(f"✅ Пользователь найден в БД на попытке {attempt + 1}/{max_search_attempts}")
             break
-        logger.warning(f"User not found on attempt {attempt + 1}. Retrying in 0.5s...")
-        time.sleep(0.5)  # задержка 0.5 секунды
+        if attempt < max_search_attempts - 1:
+            logger.info(f"🔍 Пользователь не найден на попытке {attempt + 1}/{max_search_attempts}. Ожидание 0.5s...")
+            time.sleep(0.5)  # задержка 0.5 секунды
     # ---------------------------------------------------------
     
     if existing:
@@ -213,19 +215,132 @@ def auth_webapp(body: WebAppInit, db: Session = Depends(get_db)):
 
     # если юзера нет в БД — создаем (fallback, если вебхук не пришел)
     # дополнительно проверим уникальность username
-    logger.warning("User not found after all retries. Creating a new user as a fallback.")
-    if db.query(User).filter(User.username == username).first() is not None:
-        # если конфликт — добавим суффикс
-        username = f"{username}_{user_id}"
-        logger.info(f"Username conflict, using: {username}")
-
-    new_user = User(username=username, uuid=uuid)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    logger.info(f"Created new user: id={new_user.id}, username={new_user.username}, uuid={new_user.uuid}")
-
+    logger.info("🔍 Пользователь не найден в БД после всех попыток. Создаем нового пользователя...")
+    
+    # Сохраняем оригинальный username для использования
+    base_username = username
+    
+    # Пытаемся создать пользователя с обработкой ошибок уникальности
+    max_creation_attempts = 3
+    new_user = None
+    
+    for creation_attempt in range(max_creation_attempts):
+        try:
+            # Проверяем, не появился ли пользователь в БД за это время
+            existing = db.query(User).filter(User.uuid == uuid).first()
+            if existing:
+                logger.info(f"✅ Пользователь найден в БД на попытке создания {creation_attempt + 1}")
+                new_user = existing
+                break
+            
+            # Формируем username для текущей попытки
+            current_username = base_username
+            if creation_attempt > 0:
+                # Для повторных попыток добавляем суффикс
+                current_username = f"{base_username}_{user_id}_{creation_attempt}"
+                logger.info(f"Попытка создания с username: {current_username}")
+            else:
+                # Для первой попытки проверяем, не занят ли username
+                if db.query(User).filter(User.username == base_username).first() is not None:
+                    current_username = f"{base_username}_{user_id}"
+                    logger.info(f"Username занят, используем: {current_username}")
+            
+            # Создаем нового пользователя
+            new_user = User(username=current_username, uuid=uuid)
+            db.add(new_user)
+            db.commit()
+            db.refresh(new_user)
+            logger.info(f"✅ Создан новый пользователь: id={new_user.id}, username={new_user.username}, uuid={new_user.uuid}")
+            break
+            
+        except Exception as e:
+            db.rollback()
+            error_str = str(e).lower()
+            
+            # Импортируем IntegrityError для проверки ошибок уникальности
+            from sqlalchemy.exc import IntegrityError
+            
+            # Проверяем, является ли ошибка ошибкой уникальности (uuid или username)
+            if isinstance(e, IntegrityError) or "unique" in error_str or "duplicate" in error_str or "constraint" in error_str:
+                logger.warning(f"⚠️ Ошибка уникальности при создании пользователя (попытка {creation_attempt + 1}): {e}")
+                
+                # Если ошибка по uuid, значит пользователь был создан параллельно (через вебхук)
+                # Пытаемся найти его в БД
+                if "uuid" in error_str or "uuid" in str(e) or (isinstance(e, IntegrityError) and "uuid" in str(e.orig).lower()):
+                    logger.info("🔄 Пользователь был создан параллельно (через вебхук). Ищем в БД...")
+                    # Делаем дополнительную попытку найти пользователя
+                    for retry in range(3):
+                        time.sleep(0.3)
+                        existing = db.query(User).filter(User.uuid == uuid).first()
+                        if existing:
+                            logger.info(f"✅ Пользователь найден в БД после ошибки уникальности (попытка {retry + 1})")
+                            new_user = existing
+                            break
+                    
+                    if new_user:
+                        break
+                
+                # Если ошибка по username, пробуем с другим username
+                if new_user is None and creation_attempt < max_creation_attempts - 1:
+                    logger.info(f"Повторная попытка создания пользователя с другим username...")
+                    continue
+                else:
+                    # Если не удалось создать, пытаемся найти пользователя по uuid
+                    logger.info(f"Ищем пользователя в БД по uuid...")
+                    existing = db.query(User).filter(User.uuid == uuid).first()
+                    if existing:
+                        logger.info(f"✅ Пользователь найден в БД после ошибки уникальности")
+                        new_user = existing
+                        break
+                    else:
+                        # Если это последняя попытка и пользователь не найден, пробуем еще раз
+                        if creation_attempt < max_creation_attempts - 1:
+                            logger.info(f"Пользователь не найден, повторная попытка создания...")
+                            time.sleep(0.5)
+                            continue
+                        else:
+                            logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось создать пользователя и найти его в БД после {max_creation_attempts} попыток")
+                            raise HTTPException(
+                                status_code=500, 
+                                detail=f"Не удалось создать или найти пользователя после {max_creation_attempts} попыток. Попробуйте позже."
+                            )
+            else:
+                # Другая ошибка
+                logger.error(f"❌ Ошибка при создании пользователя: {e}")
+                import traceback
+                logger.error(f"Трассировка: {traceback.format_exc()}")
+                if creation_attempt < max_creation_attempts - 1:
+                    logger.info(f"Повторная попытка создания пользователя...")
+                    time.sleep(0.5)
+                    continue
+                else:
+                    raise HTTPException(status_code=500, detail=f"Ошибка при создании пользователя: {str(e)}")
+    
+    # Проверяем, что пользователь был создан или найден
+    if not new_user:
+        logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА: Пользователь не был создан и не найден в БД")
+        raise HTTPException(status_code=500, detail="Не удалось создать или найти пользователя")
+    
+    # Обновляем username, если он изменился (используем username_from_user из initData)
+    if username_from_user and new_user.username != username_from_user:
+        try:
+            # Проверяем, не занят ли новый username
+            existing_username = db.query(User).filter(User.username == username_from_user).filter(User.id != new_user.id).first()
+            if not existing_username:
+                new_user.username = username_from_user
+                db.add(new_user)
+                db.commit()
+                db.refresh(new_user)
+                logger.info(f"✅ Обновлен username: {new_user.username}")
+            else:
+                logger.warning(f"⚠️ Username {username_from_user} уже занят, оставляем текущий: {new_user.username}")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось обновить username: {e}")
+            db.rollback()
+    
+    # Возвращаем токен для созданного или найденного пользователя
     token = create_access_token(str(new_user.id))
+    logger.info(f"✅ Авторизация успешна: пользователь id={new_user.id}, username={new_user.username}, uuid={new_user.uuid}")
     return Token(access_token=token)
 
 
