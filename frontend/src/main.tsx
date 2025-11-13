@@ -104,6 +104,8 @@ let authInProgress = false
 
 // Функция для попытки авторизации, если токена еще нет
 async function tryAutoLoginIfNeeded() {
+  const currentPlatformInfo = detectPlatform()
+  
   if (localStorage.getItem('token')) {
     console.log('[App] Токен уже есть, пропускаем авторизацию')
     return
@@ -111,27 +113,69 @@ async function tryAutoLoginIfNeeded() {
   
   if (authInProgress) {
     console.log('[App] Авторизация уже в процессе, пропускаем')
+    if (currentPlatformInfo.isIOS) {
+      console.log('[App] iOS: Авторизация уже в процессе, пропускаем')
+    }
     return
   }
   
   authInProgress = true
-  console.log('[App] Пытаемся авторизоваться...')
+  console.log('[App] ========================================')
+  console.log('[App] 🚀 Пытаемся авторизоваться...')
+  console.log('[App] Платформа:', currentPlatformInfo.platform, currentPlatformInfo.isIOS ? '(iOS)' : currentPlatformInfo.isAndroid ? '(Android)' : '')
+  if (currentPlatformInfo.isIOS) {
+    console.log('[App] iOS: ⚠️ Запуск авторизации с увеличенным временем ожидания (до 60 секунд)...')
+  }
+  console.log('[App] ========================================')
   
   try {
-    const ok = await autoLogin(true) // Ждем загрузки SDK (до 15 секунд)
+    // Для iOS используем больше времени ожидания (до 60 секунд)
+    // Для других платформ - до 30 секунд
+    const ok = await autoLogin(true)
     if (ok) {
       console.log('[App] ✅ Авторизация успешна из postMessage/SDK')
+      if (currentPlatformInfo.isIOS) {
+        console.log('[App] iOS: ✅ Авторизация успешна!')
+      }
       authAttempted = true
-      // Если мы на странице логина, перенаправляем на главную
-      if (window.location.pathname === '/login') {
-        window.location.href = '/'
+      // Проверяем, что токен действительно сохранен
+      const savedToken = localStorage.getItem('token')
+      if (savedToken) {
+        console.log('[App] ✅ Токен сохранен в localStorage после авторизации')
+        if (currentPlatformInfo.isIOS) {
+          console.log('[App] iOS: ✅ Токен сохранен, можно перенаправлять')
+        }
+        // Если мы на странице логина, перенаправляем на главную
+        if (window.location.pathname === '/login') {
+          console.log('[App] Перенаправляем на главную страницу...')
+          window.location.href = '/'
+        } else {
+          // Если мы не на странице логина, обновляем страницу, чтобы компоненты получили новый токен
+          console.log('[App] Обновляем страницу для применения токена...')
+          window.location.reload()
+        }
+      } else {
+        console.error('[App] ❌ ОШИБКА: Токен не найден после успешной авторизации!')
+        if (currentPlatformInfo.isIOS) {
+          console.error('[App] iOS: ❌ Токен не найден после успешной авторизации!')
+          console.error('[App] iOS: Проверьте логи выше для диагностики проблемы')
+        }
       }
     } else {
       console.log('[App] ⚠️ Авторизация не удалась, разрешаем повторную попытку')
+      if (currentPlatformInfo.isIOS) {
+        console.log('[App] iOS: ⚠️ Авторизация не удалась, возможно SDK не загрузился или initData не пришел')
+        console.log('[App] iOS: Проверьте логи выше для диагностики проблемы')
+        console.log('[App] iOS: Проверьте, что SDK Max загружается правильно и initData приходит через postMessage или SDK')
+      }
       // Не блокируем повторные попытки - разрешаем повторять
     }
   } catch (e) {
     console.error('[App] ❌ Ошибка при авторизации:', e)
+    if (currentPlatformInfo.isIOS) {
+      console.error('[App] iOS: ❌ Ошибка при авторизации:', e)
+      console.error('[App] iOS: Проверьте логи выше для диагностики проблемы')
+    }
     // Разрешаем повторную попытку при ошибке
   } finally {
     authInProgress = false
@@ -173,10 +217,10 @@ const postMessageHandler = (event: MessageEvent) => {
   console.log('[App] ========================================')
   console.log('[App] 📨 Получено postMessage событие')
   console.log('[App] Платформа:', platformInfo.platform, platformInfo.isIOS ? '(iOS)' : platformInfo.isAndroid ? '(Android)' : '')
-  console.log('[App] Origin:', event.origin)
+    console.log('[App] Origin:', event.origin)
   console.log('[App] Data type:', typeof event.data)
   console.log('[App] Data:', event.data)
-  
+    
   // На iOS события могут приходить в другом формате, добавляем дополнительное логирование
   if (platformInfo.isIOS) {
     console.log('[App] iOS: Обработка postMessage события...')
@@ -203,7 +247,7 @@ const postMessageHandler = (event: MessageEvent) => {
     
     // Формат 2: Объект с user_id и другими полями
     if (event.data.user_id || event.data.userId || event.data.id) {
-      console.log('[App] ✅ Найден user_id в postMessage, формируем initData...')
+        console.log('[App] ✅ Найден user_id в postMessage, формируем initData...')
       const userId = event.data.user_id || event.data.userId || event.data.id
       const firstName = event.data.first_name || event.data.firstName || event.data.firstname || ''
       const lastName = event.data.last_name || event.data.lastName || event.data.lastname || ''
@@ -246,7 +290,7 @@ const postMessageHandler = (event: MessageEvent) => {
             handleInitDataFromPostMessage(initData, 'postMessage (JSON data)')
             return
           }
-        }
+      }
       } catch (e) {
         // Не JSON, пробуем использовать как строку
         console.log('[App] postMessage.data не является JSON, используем как строку')
@@ -448,7 +492,7 @@ checkSDKInterval = setInterval(() => {
         }
         handleInitDataFromSDK(savedInitData, 'localStorage (сохраненный)')
         return
-      }
+  }
     } catch (e) {
       // Игнорируем ошибки localStorage
       if (platformInfo.isIOS) {
@@ -461,7 +505,7 @@ checkSDKInterval = setInterval(() => {
 // Останавливаем проверку через максимальное время
 setTimeout(() => {
   if (checkSDKInterval) {
-    clearInterval(checkSDKInterval)
+  clearInterval(checkSDKInterval)
     checkSDKInterval = null
     const timeoutSeconds = MAX_SDK_CHECK_TIME / 1000
     console.log(`[App] ⏱️ Остановлена проверка SDK (достигнут максимальный таймаут ${timeoutSeconds} секунд)`)
@@ -472,9 +516,32 @@ setTimeout(() => {
   }
 }, MAX_SDK_CHECK_TIME)
 
-// НЕ вызываем autoLogin здесь - это будет сделано в ProtectedRoute или Login
-// Это предотвращает дублирующие вызовы и гонки условий
+// Проверяем токен и пытаемся авторизоваться при загрузке приложения
+// Это гарантирует, что авторизация произойдет даже если пользователь не на странице /login
+console.log('[App] ========================================')
+console.log('[App] 🚀 Приложение загружается, проверяем авторизацию...')
 console.log('[App] Токен в localStorage:', localStorage.getItem('token') ? 'есть' : 'нет')
+console.log('[App] Платформа:', platformInfo.platform, platformInfo.isIOS ? '(iOS)' : platformInfo.isAndroid ? '(Android)' : '')
+
+// Пытаемся авторизоваться при загрузке приложения, если токена нет
+// Это особенно важно для iOS, где авторизация может не происходить автоматически
+if (!localStorage.getItem('token')) {
+  console.log('[App] ⚠️ Токен отсутствует, запускаем авторизацию при загрузке приложения...')
+  if (platformInfo.isIOS) {
+    console.log('[App] iOS: ⚠️ Токен отсутствует, запускаем авторизацию с увеличенным временем ожидания...')
+  }
+  
+  // Запускаем авторизацию с небольшой задержкой, чтобы дать время SDK загрузиться
+  const initialAuthDelay = platformInfo.isIOS ? 1000 : 500
+  setTimeout(() => {
+    console.log('[App] Запускаем авторизацию после задержки...')
+    tryAutoLoginIfNeeded().catch((error) => {
+      console.error('[App] Ошибка при авторизации при загрузке приложения:', error)
+    })
+  }, initialAuthDelay)
+} else {
+  console.log('[App] ✅ Токен найден, авторизация не требуется')
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

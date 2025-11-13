@@ -238,16 +238,16 @@ function getInitData(): string | null {
   
   // 1.5. Проверяем sessionStorage (может быть сохранен из postMessage)
   try {
-    const fromPostMessage = sessionStorage.getItem('initData_from_postMessage')
-    if (fromPostMessage) {
-      console.log('[getInitData] ✅ Найден в sessionStorage (из postMessage)')
+  const fromPostMessage = sessionStorage.getItem('initData_from_postMessage')
+  if (fromPostMessage) {
+    console.log('[getInitData] ✅ Найден в sessionStorage (из postMessage)')
       // Также сохраняем в localStorage для последующих запусков
       try {
         localStorage.setItem('initData_saved', fromPostMessage)
       } catch (e) {
         console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
       }
-      return fromPostMessage
+    return fromPostMessage
     }
   } catch (e) {
     console.warn('[getInitData] Ошибка при чтении sessionStorage:', e)
@@ -368,10 +368,10 @@ function getInitData(): string | null {
   
   // 3. Попытка получить из hash
   try {
-    const hashParams = new URLSearchParams(location.hash.substring(1))
+  const hashParams = new URLSearchParams(location.hash.substring(1))
     for (const paramName of possibleParamNames) {
       const fromHash = hashParams.get(paramName)
-      if (fromHash) {
+  if (fromHash) {
         console.log(`[getInitData] ✅ Найден в hash параметре: ${paramName}`)
         try {
           const decoded = decodeURIComponent(fromHash)
@@ -556,6 +556,11 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
     // Если initData все еще не найден, пробуем использовать сохраненные данные
     if (!initData) {
       console.log('[autoLogin] ⚠️ initData не найден после ожидания')
+      if (platformInfo.isIOS) {
+        console.log('[autoLogin] iOS: ⚠️ initData не найден после ожидания (до 60 секунд)')
+        console.log('[autoLogin] iOS: Это означает, что SDK Max не загрузился или initData не пришел')
+        console.log('[autoLogin] iOS: Проверяем сохраненные данные...')
+      }
       console.log('[autoLogin] Пробуем использовать сохраненные данные...')
       
       // Сначала пробуем использовать сохраненный initData из localStorage
@@ -563,14 +568,26 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
         const savedInitData = localStorage.getItem('initData_saved')
         if (savedInitData) {
           console.log('[autoLogin] ✅ Найден сохраненный initData в localStorage, используем его')
+          if (platformInfo.isIOS) {
+            console.log('[autoLogin] iOS: ✅ Найден сохраненный initData в localStorage')
+            console.log('[autoLogin] iOS: Используем сохраненный initData для авторизации')
+          }
           initData = savedInitData
+        } else {
+          if (platformInfo.isIOS) {
+            console.log('[autoLogin] iOS: ⚠️ Сохраненный initData не найден в localStorage')
+          }
         }
       } catch (e) {
         console.warn('[autoLogin] Ошибка при чтении сохраненного initData:', e)
+        if (platformInfo.isIOS) {
+          console.warn('[autoLogin] iOS: Ошибка при чтении сохраненного initData:', e)
+        }
       }
       
       // Если все еще нет initData, пробуем использовать mock данные для dev режима
-      if (!initData) {
+      // НО ТОЛЬКО ЕСЛИ НЕ iOS - на iOS мы должны получать initData от Max
+      if (!initData && !platformInfo.isIOS) {
         console.log('[autoLogin] Сохраненный initData не найден, пробуем mock данные для dev режима...')
         
         // Пробуем получить user_id из localStorage (если был сохранен ранее)
@@ -586,13 +603,6 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
           } catch (e) {
             console.warn('[autoLogin] Не удалось сохранить mock initData:', e)
           }
-        } else {
-          console.log('[autoLogin] ❌ initData не найден и нет сохраненного dev_user_id')
-          console.log('[autoLogin] Для тестирования:')
-          console.log('[autoLogin] 1. Откройте мини-приложение через Max бота, или')
-          console.log('[autoLogin] 2. В консоли выполните: localStorage.setItem("dev_user_id", "5107783")')
-          console.log('[autoLogin]    Затем перезагрузите страницу')
-          return false
         }
       }
     }
@@ -601,10 +611,32 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
       console.log('[autoLogin] ❌ initData не найден, авторизация невозможна')
       console.log('[autoLogin] Проверьте, что мини-приложение открыто через Max бота')
       if (platformInfo.isIOS) {
-        console.log('[autoLogin] iOS: ⚠️ initData не найден, авторизация невозможна')
-        console.log('[autoLogin] iOS: Проверьте, что SDK Max загружается правильно')
-        console.log('[autoLogin] iOS: Проверьте, что initData приходит через postMessage или SDK')
-        console.log('[autoLogin] iOS: Проверьте логи выше для диагностики проблемы')
+        console.log('[autoLogin] ========================================')
+        console.log('[autoLogin] iOS: ❌ КРИТИЧЕСКАЯ ПРОБЛЕМА: initData не найден!')
+        console.log('[autoLogin] iOS: Авторизация невозможна без initData')
+        console.log('[autoLogin] iOS: Возможные причины:')
+        console.log('[autoLogin] iOS: 1. SDK Max не загрузился на iPhone')
+        console.log('[autoLogin] iOS: 2. initData не приходит через postMessage')
+        console.log('[autoLogin] iOS: 3. initData не приходит через window.MaxWebApp.initData')
+        console.log('[autoLogin] iOS: 4. initData не приходит через URL параметры')
+        console.log('[autoLogin] iOS: 5. iPhone не открыт через Max бота')
+        console.log('[autoLogin] iOS: Проверьте логи выше для диагностики:')
+        console.log('[autoLogin] iOS: - Проверьте, что SDK Max загружается правильно')
+        console.log('[autoLogin] iOS: - Проверьте, что initData приходит через postMessage или SDK')
+        console.log('[autoLogin] iOS: - Проверьте, что iPhone открыт через Max бота')
+        console.log('[autoLogin] iOS: - Проверьте, что мини-приложение открыто правильно')
+        console.log('[autoLogin] iOS: ========================================')
+        console.log('[autoLogin] iOS: User Agent:', navigator.userAgent)
+        console.log('[autoLogin] iOS: window.location.href:', window.location.href)
+        console.log('[autoLogin] iOS: window.location.search:', window.location.search)
+        console.log('[autoLogin] iOS: window.location.hash:', window.location.hash)
+        const w = window as any
+        console.log('[autoLogin] iOS: window.MaxWebApp:', w?.MaxWebApp ? 'найден' : 'не найден')
+        console.log('[autoLogin] iOS: window.Telegram:', w?.Telegram ? 'найден' : 'не найден')
+        console.log('[autoLogin] iOS: window.Max:', w?.Max ? 'найден' : 'не найден')
+        console.log('[autoLogin] iOS: localStorage.getItem("initData_saved"):', localStorage.getItem('initData_saved') ? 'есть' : 'нет')
+        console.log('[autoLogin] iOS: sessionStorage.getItem("initData_from_postMessage"):', sessionStorage.getItem('initData_from_postMessage') ? 'есть' : 'нет')
+        console.log('[autoLogin] iOS: ========================================')
       }
       return false
     }
@@ -643,12 +675,23 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
     
     const apiUrl = getApiUrl()
     const endpoint = `${apiUrl}/auth/webapp-init`
+    console.log('[autoLogin] ========================================')
     console.log('[autoLogin] 📡 Отправляем запрос на:', endpoint)
     console.log('[autoLogin] Метод: POST')
     console.log('[autoLogin] Headers: Content-Type: application/json')
+    console.log('[autoLogin] Платформа:', platformInfo.platform, platformInfo.isIOS ? '(iOS)' : platformInfo.isAndroid ? '(Android)' : '')
+    if (platformInfo.isIOS) {
+      console.log('[autoLogin] iOS: 📡 Отправляем запрос на /auth/webapp-init')
+      console.log('[autoLogin] iOS: initData длина:', initData.length)
+      console.log('[autoLogin] iOS: initData (первые 100 символов):', initData.substring(0, 100))
+    }
+    console.log('[autoLogin] ========================================')
     
     const requestBody = JSON.stringify({ initData })
     console.log('[autoLogin] Body size:', requestBody.length, 'bytes')
+    if (platformInfo.isIOS) {
+      console.log('[autoLogin] iOS: Body size:', requestBody.length, 'bytes')
+    }
     
     // Повторные попытки для временных ошибок сервера
     const MAX_RETRIES = 3
@@ -658,7 +701,15 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
       try {
         if (retry > 0) {
           console.log(`[autoLogin] Повторная попытка ${retry + 1}/${MAX_RETRIES} через 1 секунду...`)
+          if (platformInfo.isIOS) {
+            console.log(`[autoLogin] iOS: Повторная попытка ${retry + 1}/${MAX_RETRIES} через 1 секунду...`)
+          }
           await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+        
+        console.log('[autoLogin] Выполняем fetch запрос...')
+        if (platformInfo.isIOS) {
+          console.log('[autoLogin] iOS: Выполняем fetch запрос к /auth/webapp-init...')
         }
         
         const res = await fetch(endpoint, {
@@ -666,6 +717,10 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
           headers: { 'Content-Type': 'application/json' },
           body: requestBody
         })
+        
+        if (platformInfo.isIOS) {
+          console.log('[autoLogin] iOS: ✅ Fetch запрос выполнен, получен ответ')
+        }
         
         console.log('[autoLogin] 📥 Получен ответ от сервера')
         console.log('[autoLogin] Status:', res.status, res.statusText)
@@ -688,6 +743,9 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
           if (isTemporaryError && retry < MAX_RETRIES - 1) {
             // Временная ошибка - пробуем еще раз
             console.log('[autoLogin] Временная ошибка сервера, повторяем попытку...')
+            if (platformInfo.isIOS) {
+              console.log('[autoLogin] iOS: Временная ошибка сервера, повторяем попытку...')
+            }
             lastError = { status: res.status, errorText }
             continue
           } else {
@@ -699,6 +757,9 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
               console.error('[autoLogin] 2. Nginx не может подключиться к бэкенду')
               console.error('[autoLogin] 3. Бэкенд перегружен или не отвечает')
               console.error('[autoLogin] 4. Проблемы с сетью между nginx и бэкендом')
+              if (platformInfo.isIOS) {
+                console.error('[autoLogin] iOS: ❌ 502 Bad Gateway - сервер недоступен')
+              }
             }
             return false
           }
@@ -710,9 +771,12 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
         if (!token) {
           console.error('[autoLogin] ❌ Токен не получен в ответе')
           console.error('[autoLogin] Ответ сервера:', data)
+          if (platformInfo.isIOS) {
+            console.error('[autoLogin] iOS: ❌ Токен не получен в ответе')
+          }
           return false
         }
-        
+    
         console.log('[autoLogin] ✅ Токен получен от сервера, длина:', token.length)
         console.log('[autoLogin] Первые 50 символов токена:', token.substring(0, 50) + '...')
         if (platformInfo.isIOS) {
@@ -721,7 +785,7 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
         
         // Сохраняем токен в localStorage
         try {
-          localStorage.setItem('token', token)
+    localStorage.setItem('token', token)
           console.log('[autoLogin] 🔐 Токен сохранен в localStorage')
           if (platformInfo.isIOS) {
             console.log('[autoLogin] iOS: 🔐 Токен сохранен в localStorage')
@@ -741,7 +805,7 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
           }
           
           console.log('[autoLogin] ✅ Токен успешно сохранен и проверен в localStorage')
-          console.log('[autoLogin] Пользователь найден в БД (был сохранен при bot_started)')
+    console.log('[autoLogin] Пользователь найден в БД (был сохранен при bot_started)')
           if (platformInfo.isIOS) {
             console.log('[autoLogin] iOS: ✅ Токен успешно сохранен и проверен в localStorage')
             console.log('[autoLogin] iOS: Авторизация успешна на iOS')
@@ -758,37 +822,37 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
           console.error('[autoLogin] ❌ Ошибка при сохранении токена в localStorage:', e)
           return false
         }
-        
+    
         // Получаем данные пользователя из БД (не критично для авторизации)
         // Временно пропускаем на iOS из-за ошибки с created_at (будет исправлено в backend)
         // После исправления backend можно убрать эту проверку
         if (!platformInfo.isIOS) {
-          try {
-            console.log('[autoLogin] Запрашиваем данные пользователя из БД...')
-            const userRes = await fetch(`${apiUrl}/auth/me`, {
-              method: 'GET',
-              headers: { 
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              }
-            })
-            
-            if (userRes.ok) {
-              const userData = await userRes.json().catch(() => null)
-              if (userData) {
-                // Сохраняем данные пользователя в localStorage
-                localStorage.setItem('user', JSON.stringify(userData))
-                console.log('[autoLogin] ✅ Данные пользователя получены и сохранены:', userData)
-                console.log(`[autoLogin] Пользователь: ${userData.username} (ID: ${userData.id}, UUID: ${userData.uuid})`)
-              }
-            } else {
-              console.warn('[autoLogin] ⚠️ Не удалось получить данные пользователя:', userRes.status)
+    try {
+      console.log('[autoLogin] Запрашиваем данные пользователя из БД...')
+      const userRes = await fetch(`${apiUrl}/auth/me`, {
+        method: 'GET',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      
+      if (userRes.ok) {
+        const userData = await userRes.json().catch(() => null)
+        if (userData) {
+          // Сохраняем данные пользователя в localStorage
+          localStorage.setItem('user', JSON.stringify(userData))
+          console.log('[autoLogin] ✅ Данные пользователя получены и сохранены:', userData)
+          console.log(`[autoLogin] Пользователь: ${userData.username} (ID: ${userData.id}, UUID: ${userData.uuid})`)
+        }
+      } else {
+        console.warn('[autoLogin] ⚠️ Не удалось получить данные пользователя:', userRes.status)
               // Не критично, токен уже сохранен
-            }
-          } catch (e) {
-            console.warn('[autoLogin] ⚠️ Ошибка при получении данных пользователя:', e)
+      }
+    } catch (e) {
+      console.warn('[autoLogin] ⚠️ Ошибка при получении данных пользователя:', e)
             // Не критично, токен уже сохранен, продолжаем работу
-          }
+    }
         } else {
           console.log('[autoLogin] iOS: Пропускаем запрос данных пользователя (endpoint /auth/me будет исправлен в backend)')
           console.log('[autoLogin] iOS: Токен сохранен, авторизация успешна')

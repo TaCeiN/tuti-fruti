@@ -10,9 +10,14 @@ export default function Settings() {
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null)
   const language = 'ru' // Фиксированный русский язык
 
+  // Проверяем наличие токена перед выполнением запросов
+  const hasToken = !!localStorage.getItem('token')
+  console.log('[Settings] Токен в localStorage:', hasToken ? 'есть' : 'нет')
+
   const { data: settings, isLoading } = useQuery({
     queryKey: ['userSettings'],
-    queryFn: getUserSettings
+    queryFn: getUserSettings,
+    enabled: hasToken // Выполняем запрос только если есть токен
   })
 
   const updateSettings = useMutation({

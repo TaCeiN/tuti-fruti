@@ -246,8 +246,8 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
             } else {
               // Все попытки исчерпаны
               console.log('[ProtectedRoute] ❌ Все попытки исчерпаны, устанавливаем failed=true')
-              setChecking(false)
-              setFailed(true)
+          setChecking(false)
+            setFailed(true)
             }
           }
         }
@@ -263,10 +263,10 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
               }
             }, 2000)
           } else {
-            setChecking(false)
-            setFailed(true)
-          }
+          setChecking(false)
+          setFailed(true)
         }
+      }
       }
     }
     

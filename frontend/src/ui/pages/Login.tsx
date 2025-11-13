@@ -243,8 +243,8 @@ export default function Login() {
           } else {
             // Все попытки исчерпаны, показываем ошибку
             console.log('[Login] ❌ Все попытки исчерпаны, показываем страницу ошибки')
-            setAuthFailed(true)
-            setCheckingAuth(false)
+          setAuthFailed(true)
+          setCheckingAuth(false)
           }
         }
       } catch (e) {
@@ -259,10 +259,10 @@ export default function Login() {
               }
             }, 2000)
           } else {
-            setAuthFailed(true)
-            setCheckingAuth(false)
-          }
+          setAuthFailed(true)
+          setCheckingAuth(false)
         }
+      }
       }
     }
     
