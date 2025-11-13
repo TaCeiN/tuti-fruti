@@ -12,7 +12,7 @@ const getApiUrl = (): string => {
   }
   
   // В production используем домен
-  return 'https://backend-devcore-max.cloudpub.ru'
+  return 'https://backend.devcore.com.ru'
 }
 
 const API_URL = getApiUrl()

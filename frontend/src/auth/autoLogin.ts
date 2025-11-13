@@ -670,7 +670,7 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
       if (import.meta.env.DEV) {
         return 'http://localhost:8000'
       }
-      return 'https://backend-devcore-max.cloudpub.ru'
+      return 'https://backend.devcore.com.ru'
     }
     
     const apiUrl = getApiUrl()
