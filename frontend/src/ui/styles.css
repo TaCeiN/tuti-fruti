@@ -174,43 +174,43 @@ body {
     opacity: 1;
     transform: translateY(0);
   }
+}
 
-  .deadline-card {
-    gap: 10px;
-    padding: 10px 12px 9px;
-  }
+.deadline-card {
+  gap: 10px;
+  padding: 10px 12px 9px;
+}
 
-  .deadline-card__fields {
-    justify-content: space-between;
-    column-gap: 6px;
-    row-gap: 8px;
-  }
+.deadline-card__fields {
+  justify-content: space-between;
+  column-gap: 6px;
+  row-gap: 8px;
+}
 
-  .deadline-card__segment {
-    min-width: 58px;
-  }
+.deadline-card__segment {
+  min-width: 58px;
+}
 
-  .deadline-card__input {
-    height: 32px;
-    font-size: 13px;
-  }
+.deadline-card__input {
+  height: 32px;
+  font-size: 13px;
+}
 
-  .deadline-card__segment--time {
-    gap: 6px;
-  }
+.deadline-card__segment--time {
+  gap: 6px;
+}
 
-  .deadline-card__time-inputs {
-    gap: 6px;
-  }
+.deadline-card__time-inputs {
+  gap: 6px;
+}
 
-  .deadline-card__actions {
-    gap: 10px;
-  }
+.deadline-card__actions {
+  gap: 10px;
+}
 
-  .deadline-card__action {
-    width: 36px;
-    height: 36px;
-  }
+.deadline-card__action {
+  width: 36px;
+  height: 36px;
 }
 
 @keyframes fadeIn {
