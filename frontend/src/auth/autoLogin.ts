@@ -1,8 +1,9 @@
 /**
  * Ожидает загрузки Max WebApp SDK и получения initData
  * Делает повторные попытки с интервалом
+ * Увеличено время ожидания для надежной работы с медленной загрузкой SDK
  */
-async function waitForInitData(maxAttempts: number = 10, intervalMs: number = 500): Promise<string | null> {
+async function waitForInitData(maxAttempts: number = 30, intervalMs: number = 500): Promise<string | null> {
   const w = window as any
   
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -192,7 +193,8 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
     // Если не найден и нужно ждать, делаем повторные попытки
     if (!initData && waitForData) {
       console.log('[autoLogin] ⚠️ initData не найден сразу, ожидаем загрузки SDK...')
-      initData = await waitForInitData(10, 500) // 10 попыток по 500ms = до 5 секунд
+      // Увеличено до 30 попыток по 500ms = до 15 секунд для надежной работы с медленной загрузкой SDK
+      initData = await waitForInitData(30, 500)
     }
     
     // Для dev режима: если initData все еще не найден, пробуем использовать mock данные
@@ -255,72 +257,112 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
     const requestBody = JSON.stringify({ initData })
     console.log('[autoLogin] Body size:', requestBody.length, 'bytes')
     
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: requestBody
-    })
+    // Повторные попытки для временных ошибок сервера
+    const MAX_RETRIES = 3
+    let lastError: any = null
     
-    console.log('[autoLogin] 📥 Получен ответ от сервера')
-    console.log('[autoLogin] Status:', res.status, res.statusText)
-    console.log('[autoLogin] Response URL:', res.url)
+    for (let retry = 0; retry < MAX_RETRIES; retry++) {
+      try {
+        if (retry > 0) {
+          console.log(`[autoLogin] Повторная попытка ${retry + 1}/${MAX_RETRIES} через 1 секунду...`)
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+        
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody
+        })
+        
+        console.log('[autoLogin] 📥 Получен ответ от сервера')
+        console.log('[autoLogin] Status:', res.status, res.statusText)
+        console.log('[autoLogin] Response URL:', res.url)
 
-    if (!res.ok) {
-      const errorText = await res.text().catch(() => 'Unknown error')
-      console.error('[autoLogin] Ошибка ответа сервера:', res.status, errorText)
-      
-      // Специальная обработка 502 Bad Gateway
-      if (res.status === 502) {
-        console.error('[autoLogin] ❌ 502 Bad Gateway - сервер недоступен или перегружен')
-        console.error('[autoLogin] Возможные причины:')
-        console.error('[autoLogin] 1. Бэкенд не запущен или упал')
-        console.error('[autoLogin] 2. Nginx не может подключиться к бэкенду')
-        console.error('[autoLogin] 3. Бэкенд перегружен или не отвечает')
-        console.error('[autoLogin] 4. Проблемы с сетью между nginx и бэкендом')
-      }
-      
-      return false
-    }
-    
-    const data = await res.json().catch(() => null)
-    const token = data?.access_token
-    if (!token) {
-      console.error('[autoLogin] Токен не получен в ответе')
-      return false
-    }
-    
-    localStorage.setItem('token', token)
-    console.log('[autoLogin] ✅ Успешный логин! Токен сохранен')
-    console.log('[autoLogin] Пользователь найден в БД (был сохранен при bot_started)')
-    
-    // Получаем данные пользователя из БД
-    try {
-      console.log('[autoLogin] Запрашиваем данные пользователя из БД...')
-      const userRes = await fetch(`${apiUrl}/auth/me`, {
-        method: 'GET',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+        if (!res.ok) {
+          const errorText = await res.text().catch(() => 'Unknown error')
+          console.error(`[autoLogin] Ошибка ответа сервера (попытка ${retry + 1}/${MAX_RETRIES}):`, res.status, errorText)
+          
+          // Проверяем, является ли ошибка временной (502, 503, 504, 429)
+          const isTemporaryError = res.status === 502 || res.status === 503 || res.status === 504 || res.status === 429
+          
+          if (isTemporaryError && retry < MAX_RETRIES - 1) {
+            // Временная ошибка - пробуем еще раз
+            console.log('[autoLogin] Временная ошибка сервера, повторяем попытку...')
+            lastError = { status: res.status, errorText }
+            continue
+          } else {
+            // Постоянная ошибка или все попытки исчерпаны
+            if (res.status === 502) {
+              console.error('[autoLogin] ❌ 502 Bad Gateway - сервер недоступен или перегружен')
+              console.error('[autoLogin] Возможные причины:')
+              console.error('[autoLogin] 1. Бэкенд не запущен или упал')
+              console.error('[autoLogin] 2. Nginx не может подключиться к бэкенду')
+              console.error('[autoLogin] 3. Бэкенд перегружен или не отвечает')
+              console.error('[autoLogin] 4. Проблемы с сетью между nginx и бэкендом')
+            }
+            return false
+          }
         }
-      })
-      
-      if (userRes.ok) {
-        const userData = await userRes.json().catch(() => null)
-        if (userData) {
-          // Сохраняем данные пользователя в localStorage
-          localStorage.setItem('user', JSON.stringify(userData))
-          console.log('[autoLogin] ✅ Данные пользователя получены и сохранены:', userData)
-          console.log(`[autoLogin] Пользователь: ${userData.username} (ID: ${userData.id}, UUID: ${userData.uuid})`)
+        
+        // Успешный ответ - обрабатываем токен
+        const data = await res.json().catch(() => null)
+        const token = data?.access_token
+        if (!token) {
+          console.error('[autoLogin] Токен не получен в ответе')
+          return false
         }
-      } else {
-        console.warn('[autoLogin] ⚠️ Не удалось получить данные пользователя:', userRes.status)
+        
+        localStorage.setItem('token', token)
+        console.log('[autoLogin] ✅ Успешный логин! Токен сохранен')
+        console.log('[autoLogin] Пользователь найден в БД (был сохранен при bot_started)')
+        
+        // Получаем данные пользователя из БД
+        try {
+          console.log('[autoLogin] Запрашиваем данные пользователя из БД...')
+          const userRes = await fetch(`${apiUrl}/auth/me`, {
+            method: 'GET',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            }
+          })
+          
+          if (userRes.ok) {
+            const userData = await userRes.json().catch(() => null)
+            if (userData) {
+              // Сохраняем данные пользователя в localStorage
+              localStorage.setItem('user', JSON.stringify(userData))
+              console.log('[autoLogin] ✅ Данные пользователя получены и сохранены:', userData)
+              console.log(`[autoLogin] Пользователь: ${userData.username} (ID: ${userData.id}, UUID: ${userData.uuid})`)
+            }
+          } else {
+            console.warn('[autoLogin] ⚠️ Не удалось получить данные пользователя:', userRes.status)
+          }
+        } catch (e) {
+          console.warn('[autoLogin] ⚠️ Ошибка при получении данных пользователя:', e)
+          // Не критично, продолжаем работу
+        }
+        
+        return true
+        
+      } catch (e) {
+        console.error(`[autoLogin] Ошибка при запросе (попытка ${retry + 1}/${MAX_RETRIES}):`, e)
+        lastError = e
+        
+        // Если это не последняя попытка и ошибка сети, пробуем еще раз
+        if (retry < MAX_RETRIES - 1) {
+          console.log('[autoLogin] Ошибка сети, повторяем попытку...')
+          continue
+        } else {
+          console.error('[autoLogin] ❌ Все попытки исчерпаны, авторизация не удалась')
+          return false
+        }
       }
-    } catch (e) {
-      console.warn('[autoLogin] ⚠️ Ошибка при получении данных пользователя:', e)
-      // Не критично, продолжаем работу
     }
     
-    return true
+    // Если дошли сюда, все попытки исчерпаны
+    console.error('[autoLogin] ❌ Все попытки авторизации исчерпаны')
+    return false
   } catch (e) {
     console.error('[autoLogin] ❌ Исключение:', e)
     return false

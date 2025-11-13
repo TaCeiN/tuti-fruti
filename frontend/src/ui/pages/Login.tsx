@@ -25,29 +25,65 @@ export default function Login() {
       return
     }
     
-    // Пытаемся автоматически залогиниться с ожиданием SDK
+    // Пытаемся автоматически залогиниться с ожиданием SDK и повторными попытками
     console.log('[Login] Токена нет, пытаемся autoLogin с ожиданием SDK...')
     let canceled = false
-    ;(async () => {
+    let attemptCount = 0
+    const MAX_ATTEMPTS = 3 // Максимум 3 попытки
+    
+    const tryAuth = async () => {
+      if (canceled) return
+      
+      attemptCount++
+      console.log(`[Login] Попытка авторизации ${attemptCount}/${MAX_ATTEMPTS}`)
+      
       try {
-        // Ждем загрузки SDK и initData (до 5 секунд)
+        // Ждем загрузки SDK и initData (до 15 секунд)
         const ok = await autoLogin(true)
         if (!canceled && ok) {
           console.log('[Login] autoLogin успешен, перенаправляем на главную')
-          navigate('/')
-        } else if (!canceled) {
-          console.log('[Login] autoLogin не удался, показываем страницу ошибки')
-          setAuthFailed(true)
           setCheckingAuth(false)
+          navigate('/')
+          return
+        } else if (!canceled) {
+          console.log(`[Login] autoLogin не удался (попытка ${attemptCount}/${MAX_ATTEMPTS})`)
+          
+          // Если это не последняя попытка, пробуем еще раз через 1 секунду
+          if (attemptCount < MAX_ATTEMPTS) {
+            console.log('[Login] Повторная попытка через 1 секунду...')
+            setTimeout(() => {
+              if (!canceled) {
+                tryAuth()
+              }
+            }, 1000)
+          } else {
+            // Все попытки исчерпаны, показываем ошибку
+            console.log('[Login] Все попытки исчерпаны, показываем страницу ошибки')
+            setAuthFailed(true)
+            setCheckingAuth(false)
+          }
         }
       } catch (e) {
-        console.error('[Login] Ошибка в autoLogin:', e)
+        console.error(`[Login] Ошибка в autoLogin (попытка ${attemptCount}/${MAX_ATTEMPTS}):`, e)
         if (!canceled) {
-          setAuthFailed(true)
-          setCheckingAuth(false)
+          // Если это не последняя попытка, пробуем еще раз
+          if (attemptCount < MAX_ATTEMPTS) {
+            console.log('[Login] Повторная попытка через 1 секунду после ошибки...')
+            setTimeout(() => {
+              if (!canceled) {
+                tryAuth()
+              }
+            }, 1000)
+          } else {
+            setAuthFailed(true)
+            setCheckingAuth(false)
+          }
         }
       }
-    })()
+    }
+    
+    // Начинаем первую попытку
+    tryAuth()
     
     return () => { canceled = true }
   }, [navigate])

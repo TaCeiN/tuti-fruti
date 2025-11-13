@@ -70,6 +70,7 @@ if (w?.MaxWebApp) {
 
 // Глобальный флаг для отслеживания, была ли уже попытка авторизации
 let authAttempted = false
+let authInProgress = false
 
 // Функция для попытки авторизации, если токена еще нет
 async function tryAutoLoginIfNeeded() {
@@ -78,29 +79,32 @@ async function tryAutoLoginIfNeeded() {
     return
   }
   
-  if (authAttempted) {
-    console.log('[App] Авторизация уже была попытка, пропускаем')
+  if (authInProgress) {
+    console.log('[App] Авторизация уже в процессе, пропускаем')
     return
   }
   
-  authAttempted = true
+  authInProgress = true
   console.log('[App] Пытаемся авторизоваться...')
   
   try {
-    const ok = await autoLogin(true) // Ждем загрузки SDK
+    const ok = await autoLogin(true) // Ждем загрузки SDK (до 15 секунд)
     if (ok) {
       console.log('[App] ✅ Авторизация успешна из postMessage/SDK')
+      authAttempted = true
       // Если мы на странице логина, перенаправляем на главную
       if (window.location.pathname === '/login') {
         window.location.href = '/'
       }
     } else {
-      console.log('[App] ⚠️ Авторизация не удалась, но это нормально - будет повторная попытка')
-      authAttempted = false // Разрешаем повторную попытку
+      console.log('[App] ⚠️ Авторизация не удалась, разрешаем повторную попытку')
+      // Не блокируем повторные попытки - разрешаем повторять
     }
   } catch (e) {
     console.error('[App] ❌ Ошибка при авторизации:', e)
-    authAttempted = false // Разрешаем повторную попытку при ошибке
+    // Разрешаем повторную попытку при ошибке
+  } finally {
+    authInProgress = false
   }
 }
 
@@ -135,32 +139,67 @@ if (window.parent !== window) {
 
 // Слушаем изменения в Max WebApp SDK (если SDK загружается асинхронно)
 let lastInitData: string | null = null
+let checkSDKInterval: ReturnType<typeof setInterval> | null = null
+let checkSDKStartTime = Date.now()
+const MAX_SDK_CHECK_TIME = 20000 // 20 секунд для проверки SDK
+
+// Функция для проверки SDK и остановки при необходимости
+function checkSDKAndStopIfNeeded() {
+  if (localStorage.getItem('token')) {
+    if (checkSDKInterval) {
+      clearInterval(checkSDKInterval)
+      checkSDKInterval = null
+    }
+    console.log('[App] Токен получен, останавливаем проверку SDK')
+    return true
+  }
+  
+  const elapsed = Date.now() - checkSDKStartTime
+  if (elapsed > MAX_SDK_CHECK_TIME) {
+    if (checkSDKInterval) {
+      clearInterval(checkSDKInterval)
+      checkSDKInterval = null
+    }
+    console.log('[App] Остановлена проверка SDK (прошло 20 секунд)')
+    return true
+  }
+  
+  return false
+}
 
 // Проверяем появление initData в SDK с интервалом
-const checkSDKInterval = setInterval(() => {
-  if (localStorage.getItem('token')) {
-    clearInterval(checkSDKInterval)
+checkSDKInterval = setInterval(() => {
+  if (checkSDKAndStopIfNeeded()) {
     return
   }
   
+  // Проверяем SDK объекты
   const currentInitData = w?.MaxWebApp?.initData || 
                          w?.Telegram?.WebApp?.initData || 
                          w?.Max?.WebApp?.initData
+  
+  // Также проверяем sessionStorage (может быть сохранен из postMessage)
+  const fromSessionStorage = sessionStorage.getItem('initData_from_postMessage')
   
   if (currentInitData && currentInitData !== lastInitData) {
     console.log('[App] ✅ initData появился в SDK!')
     lastInitData = currentInitData
     tryAutoLoginIfNeeded()
-    // Останавливаем проверку после успешной авторизации или через 10 секунд
-    setTimeout(() => clearInterval(checkSDKInterval), 10000)
+  } else if (fromSessionStorage && fromSessionStorage !== lastInitData) {
+    console.log('[App] ✅ initData найден в sessionStorage (из postMessage)!')
+    lastInitData = fromSessionStorage
+    tryAutoLoginIfNeeded()
   }
-}, 500) // Проверяем каждые 500ms
+}, 300) // Проверяем каждые 300ms (чаще, чем раньше)
 
-// Останавливаем проверку через 10 секунд
+// Останавливаем проверку через максимальное время
 setTimeout(() => {
-  clearInterval(checkSDKInterval)
-  console.log('[App] Остановлена проверка SDK (прошло 10 секунд)')
-}, 10000)
+  if (checkSDKInterval) {
+    clearInterval(checkSDKInterval)
+    checkSDKInterval = null
+  }
+  console.log('[App] Остановлена проверка SDK (достигнут максимальный таймаут)')
+}, MAX_SDK_CHECK_TIME)
 
 // НЕ вызываем autoLogin здесь - это будет сделано в ProtectedRoute или Login
 // Это предотвращает дублирующие вызовы и гонки условий

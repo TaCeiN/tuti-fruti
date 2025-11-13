@@ -19,27 +19,65 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     
     console.log('[ProtectedRoute] Токена нет, запускаем autoLogin с ожиданием SDK...')
     let canceled = false
-    ;(async () => {
+    let attemptCount = 0
+    const MAX_ATTEMPTS = 3 // Максимум 3 попытки
+    
+    const tryAuth = async () => {
+      if (canceled) return
+      
+      attemptCount++
+      console.log(`[ProtectedRoute] Попытка авторизации ${attemptCount}/${MAX_ATTEMPTS}`)
+      
       try {
         console.log('[ProtectedRoute] Вызываем autoLogin() с waitForData=true...')
-        // Ждем загрузки SDK и initData (до 5 секунд)
+        // Ждем загрузки SDK и initData (до 15 секунд)
         const ok = await autoLogin(true)
         console.log('[ProtectedRoute] autoLogin() вернул:', ok)
+        
         if (!canceled) {
-          setChecking(false)
-          if (!ok) {
-            console.log('[ProtectedRoute] autoLogin() не удался, устанавливаем failed=true')
-            setFailed(true)
+          if (ok) {
+            // Успешная авторизация
+            setChecking(false)
+            setFailed(false)
+          } else {
+            // Если это не последняя попытка, пробуем еще раз через 1 секунду
+            if (attemptCount < MAX_ATTEMPTS) {
+              console.log('[ProtectedRoute] Повторная попытка через 1 секунду...')
+              setTimeout(() => {
+                if (!canceled) {
+                  tryAuth()
+                }
+              }, 1000)
+            } else {
+              // Все попытки исчерпаны
+              console.log('[ProtectedRoute] Все попытки исчерпаны, устанавливаем failed=true')
+              setChecking(false)
+              setFailed(true)
+            }
           }
         }
       } catch (e) {
-        console.error('[ProtectedRoute] Ошибка в autoLogin():', e)
+        console.error(`[ProtectedRoute] Ошибка в autoLogin() (попытка ${attemptCount}/${MAX_ATTEMPTS}):`, e)
         if (!canceled) {
-          setChecking(false)
-          setFailed(true)
+          // Если это не последняя попытка, пробуем еще раз
+          if (attemptCount < MAX_ATTEMPTS) {
+            console.log('[ProtectedRoute] Повторная попытка через 1 секунду после ошибки...')
+            setTimeout(() => {
+              if (!canceled) {
+                tryAuth()
+              }
+            }, 1000)
+          } else {
+            setChecking(false)
+            setFailed(true)
+          }
         }
       }
-    })()
+    }
+    
+    // Начинаем первую попытку
+    tryAuth()
+    
     return () => { canceled = true }
   }, [])
 
