@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && npm run copy-404",
+    "build": "tsc --noEmit && vite build && npm run copy-404",
     "copy-404": "node -e \"const fs = require('fs'); fs.copyFileSync('dist/index.html', 'dist/404.html')\"",
     "preview": "vite preview",
     "deploy": "docker compose -f docker-compose.deploy.yml up --build"
