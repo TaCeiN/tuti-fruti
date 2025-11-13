@@ -308,15 +308,41 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
         const data = await res.json().catch(() => null)
         const token = data?.access_token
         if (!token) {
-          console.error('[autoLogin] Токен не получен в ответе')
+          console.error('[autoLogin] ❌ Токен не получен в ответе')
+          console.error('[autoLogin] Ответ сервера:', data)
           return false
         }
         
-        localStorage.setItem('token', token)
-        console.log('[autoLogin] ✅ Успешный логин! Токен сохранен')
-        console.log('[autoLogin] Пользователь найден в БД (был сохранен при bot_started)')
+        console.log('[autoLogin] ✅ Токен получен от сервера, длина:', token.length)
+        console.log('[autoLogin] Первые 50 символов токена:', token.substring(0, 50) + '...')
         
-        // Получаем данные пользователя из БД
+        // Сохраняем токен в localStorage
+        try {
+          localStorage.setItem('token', token)
+          console.log('[autoLogin] 🔐 Токен сохранен в localStorage')
+          
+          // Проверяем, что токен действительно сохранен
+          const savedToken = localStorage.getItem('token')
+          if (!savedToken || savedToken !== token) {
+            console.error('[autoLogin] ❌ ОШИБКА: Токен не сохранен правильно в localStorage!')
+            console.error('[autoLogin] Ожидаемый токен:', token.substring(0, 50))
+            console.error('[autoLogin] Сохраненный токен:', savedToken ? savedToken.substring(0, 50) : 'null')
+            return false
+          }
+          
+          console.log('[autoLogin] ✅ Токен успешно сохранен и проверен в localStorage')
+          console.log('[autoLogin] Пользователь найден в БД (был сохранен при bot_started)')
+          
+          // Небольшая задержка для гарантии сохранения токена перед возвратом
+          await new Promise(resolve => setTimeout(resolve, 100))
+          console.log('[autoLogin] Задержка завершена, токен гарантированно сохранен')
+          
+        } catch (e) {
+          console.error('[autoLogin] ❌ Ошибка при сохранении токена в localStorage:', e)
+          return false
+        }
+        
+        // Получаем данные пользователя из БД (не критично для авторизации)
         try {
           console.log('[autoLogin] Запрашиваем данные пользователя из БД...')
           const userRes = await fetch(`${apiUrl}/auth/me`, {
@@ -337,12 +363,21 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
             }
           } else {
             console.warn('[autoLogin] ⚠️ Не удалось получить данные пользователя:', userRes.status)
+            // Не критично, токен уже сохранен
           }
         } catch (e) {
           console.warn('[autoLogin] ⚠️ Ошибка при получении данных пользователя:', e)
-          // Не критично, продолжаем работу
+          // Не критично, токен уже сохранен, продолжаем работу
         }
         
+        // Финальная проверка токена перед возвратом
+        const finalTokenCheck = localStorage.getItem('token')
+        if (!finalTokenCheck) {
+          console.error('[autoLogin] ❌ КРИТИЧЕСКАЯ ОШИБКА: Токен исчез из localStorage!')
+          return false
+        }
+        
+        console.log('[autoLogin] ✅✅✅ Авторизация успешно завершена! Токен сохранен и проверен.')
         return true
         
       } catch (e) {

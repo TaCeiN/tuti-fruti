@@ -41,9 +41,58 @@ export default function Login() {
         // Ждем загрузки SDK и initData (до 15 секунд)
         const ok = await autoLogin(true)
         if (!canceled && ok) {
-          console.log('[Login] autoLogin успешен, перенаправляем на главную')
+          console.log('[Login] autoLogin успешен, проверяем токен...')
+          
+          // Проверяем, что токен действительно сохранен
+          const savedToken = localStorage.getItem('token')
+          if (!savedToken) {
+            console.error('[Login] ❌ ОШИБКА: Токен не найден после успешной авторизации!')
+            // Если это не последняя попытка, пробуем еще раз
+            if (attemptCount < MAX_ATTEMPTS) {
+              console.log('[Login] Повторная попытка через 1 секунду...')
+              setTimeout(() => {
+                if (!canceled) {
+                  tryAuth()
+                }
+              }, 1000)
+            } else {
+              setAuthFailed(true)
+              setCheckingAuth(false)
+            }
+            return
+          }
+          
+          console.log('[Login] ✅ Токен найден в localStorage после авторизации')
+          console.log('[Login] Длина токена:', savedToken.length)
+          
+          // Небольшая задержка для гарантии сохранения токена
+          await new Promise(resolve => setTimeout(resolve, 200))
+          
+          // Финальная проверка токена перед навигацией
+          const finalToken = localStorage.getItem('token')
+          if (!finalToken) {
+            console.error('[Login] ❌ КРИТИЧЕСКАЯ ОШИБКА: Токен исчез после задержки!')
+            if (attemptCount < MAX_ATTEMPTS) {
+              setTimeout(() => {
+                if (!canceled) {
+                  tryAuth()
+                }
+              }, 1000)
+            } else {
+              setAuthFailed(true)
+              setCheckingAuth(false)
+            }
+            return
+          }
+          
+          console.log('[Login] ✅✅ Токен подтвержден, перенаправляем на главную')
           setCheckingAuth(false)
-          navigate('/')
+          setAuthFailed(false)
+          
+          // Используем window.location.href для принудительной перезагрузки страницы
+          // Это гарантирует, что все компоненты получат актуальный токен
+          console.log('[Login] Выполняем навигацию на главную страницу...')
+          window.location.href = '/'
           return
         } else if (!canceled) {
           console.log(`[Login] autoLogin не удался (попытка ${attemptCount}/${MAX_ATTEMPTS})`)

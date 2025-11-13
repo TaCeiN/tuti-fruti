@@ -110,30 +110,71 @@ export default function Dashboard() {
   const scenarioPillRef = useRef<HTMLDivElement>(null)
   const notificationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [maxHeight, setMaxHeight] = useState<string | undefined>(undefined)
+  const [hasToken, setHasToken] = useState<boolean>(() => !!localStorage.getItem('token'))
+  
+  // Проверяем наличие токена периодически
+  useEffect(() => {
+    const checkToken = () => {
+      const token = localStorage.getItem('token')
+      const currentHasToken = !!token
+      if (currentHasToken !== hasToken) {
+        console.log('[Dashboard] Токен изменился:', currentHasToken ? 'есть' : 'нет')
+        setHasToken(currentHasToken)
+      }
+    }
+
+    // Проверяем токен сразу
+    checkToken()
+
+    // Проверяем токен периодически
+    const interval = setInterval(checkToken, 100)
+
+    return () => clearInterval(interval)
+  }, [hasToken])
+  
+  // Функция для проверки наличия токена перед выполнением запросов
+  // Используем состояние hasToken для эффективности
+  const canMakeRequests = hasToken && !!localStorage.getItem('token')
+  
+  console.log('[Dashboard] canMakeRequests:', canMakeRequests, 'hasToken:', hasToken)
   
   const { data: folders } = useQuery({ 
     queryKey: ['folders'], 
-    queryFn: () => api<Folder[]>('/api/folders') 
+    queryFn: () => {
+      console.log('[Dashboard] Запрос к /api/folders')
+      return api<Folder[]>('/api/folders')
+    },
+    enabled: canMakeRequests
   })
 
   // Загружаем все заметки для поиска
   const { data: allNotes } = useQuery({ 
     queryKey: ['notes'], 
-    queryFn: () => api<Note[]>('/api/notes')
+    queryFn: () => {
+      console.log('[Dashboard] Запрос к /api/notes')
+      return api<Note[]>('/api/notes')
+    },
+    enabled: canMakeRequests
   })
 
   // Загружаем все теги
   const { data: allTags } = useQuery({ 
     queryKey: ['tags'], 
-    queryFn: () => api<Tag[]>('/api/tags'), 
-    enabled: true 
+    queryFn: () => {
+      console.log('[Dashboard] Запрос к /api/tags')
+      return api<Tag[]>('/api/tags')
+    },
+    enabled: canMakeRequests
   })
 
   // Загружаем избранную заметку
   const { data: favoriteNote } = useQuery({ 
     queryKey: ['favoriteNote'], 
-    queryFn: () => api<Note | null>('/api/notes/favorite'),
-    enabled: true 
+    queryFn: () => {
+      console.log('[Dashboard] Запрос к /api/notes/favorite')
+      return api<Note | null>('/api/notes/favorite')
+    },
+    enabled: canMakeRequests
   })
 
   // Загружаем дедлайн для избранной заметки
@@ -142,6 +183,7 @@ export default function Dashboard() {
     queryFn: async () => {
       if (!favoriteNote?.id) return null
       try {
+        console.log('[Dashboard] Запрос дедлайна для заметки:', favoriteNote.id)
         return await getDeadline(favoriteNote.id)
       } catch (error: any) {
         if (error.message?.includes('404') || error.message?.includes('не найден')) {
@@ -150,7 +192,7 @@ export default function Dashboard() {
         throw error
       }
     },
-    enabled: !!favoriteNote?.id
+    enabled: canMakeRequests && !!favoriteNote?.id
   })
 
   // Функция для расчета процента выполнения todo-листа

@@ -5,6 +5,30 @@ import { autoLogin } from '../../auth/autoLogin'
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const [checking, setChecking] = useState<boolean>(() => !localStorage.getItem('token'))
   const [failed, setFailed] = useState<boolean>(false)
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'))
+
+  // Слушаем изменения токена в localStorage
+  useEffect(() => {
+    const checkToken = () => {
+      const currentToken = localStorage.getItem('token')
+      if (currentToken !== token) {
+        console.log('[ProtectedRoute] Токен изменился в localStorage, обновляем состояние')
+        setToken(currentToken)
+        if (currentToken) {
+          setChecking(false)
+          setFailed(false)
+        }
+      }
+    }
+
+    // Проверяем токен сразу
+    checkToken()
+
+    // Проверяем токен периодически (на случай, если он изменился извне)
+    const interval = setInterval(checkToken, 100)
+
+    return () => clearInterval(interval)
+  }, [token])
 
   useEffect(() => {
     console.log('[ProtectedRoute] Компонент монтирован')
@@ -14,6 +38,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     if (hasToken) {
       console.log('[ProtectedRoute] Токен найден, пропускаем autoLogin')
       setChecking(false)
+      setToken(localStorage.getItem('token'))
       return
     }
     
@@ -36,9 +61,43 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
         
         if (!canceled) {
           if (ok) {
-            // Успешная авторизация
-            setChecking(false)
-            setFailed(false)
+            // Успешная авторизация - проверяем токен
+            const savedToken = localStorage.getItem('token')
+            console.log('[ProtectedRoute] ✅ Авторизация успешна, проверяем токен...')
+            console.log('[ProtectedRoute] Токен в localStorage:', savedToken ? 'есть' : 'нет')
+            
+            if (savedToken) {
+              console.log('[ProtectedRoute] ✅ Токен найден в localStorage после авторизации')
+              setToken(savedToken)
+              setChecking(false)
+              setFailed(false)
+              
+              // Небольшая задержка для гарантии обновления компонентов
+              setTimeout(() => {
+                if (!canceled) {
+                  const finalToken = localStorage.getItem('token')
+                  console.log('[ProtectedRoute] Финальная проверка токена:', finalToken ? 'есть' : 'нет')
+                  if (finalToken) {
+                    setToken(finalToken)
+                    setChecking(false)
+                  }
+                }
+              }, 200)
+            } else {
+              console.error('[ProtectedRoute] ❌ ОШИБКА: Токен не найден после успешной авторизации!')
+              // Если это не последняя попытка, пробуем еще раз
+              if (attemptCount < MAX_ATTEMPTS) {
+                console.log('[ProtectedRoute] Повторная попытка через 1 секунду...')
+                setTimeout(() => {
+                  if (!canceled) {
+                    tryAuth()
+                  }
+                }, 1000)
+              } else {
+                setChecking(false)
+                setFailed(true)
+              }
+            }
           } else {
             // Если это не последняя попытка, пробуем еще раз через 1 секунду
             if (attemptCount < MAX_ATTEMPTS) {
@@ -81,8 +140,12 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     return () => { canceled = true }
   }, [])
 
-  const token = localStorage.getItem('token')
-  if (token) return <>{children}</>
+  // Используем состояние token вместо прямого чтения из localStorage
+  if (token) {
+    console.log('[ProtectedRoute] Токен есть, разрешаем доступ к защищенному контенту')
+    return <>{children}</>
+  }
+  
   if (checking) {
     // Показываем индикатор загрузки во время проверки авторизации
     return (

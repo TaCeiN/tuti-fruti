@@ -27,25 +27,56 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     ...(options.headers as Record<string, string> | undefined)
   }
   const token = getToken()
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  const hasToken = !!token
+  
+  // Детальное логирование токена
+  if (hasToken) {
+    headers['Authorization'] = `Bearer ${token}`
+    console.log(`[API] ✅ Токен найден в localStorage, длина: ${token!.length}`)
+    console.log(`[API] Токен (первые 30 символов): ${token!.substring(0, 30)}...`)
+    console.log(`[API] Токен (последние 10 символов): ...${token!.substring(token!.length - 10)}`)
+  } else {
+    console.warn(`[API] ⚠️ Токен НЕ найден в localStorage!`)
+    console.warn(`[API] Запрос будет выполнен без заголовка Authorization`)
+  }
 
   const url = `${API_URL}${path}`
-  console.log(`[API] ${options.method || 'GET'} ${url}`, { headers, body: options.body })
+  console.log(`[API] ========================================`)
+  console.log(`[API] ${options.method || 'GET'} ${url}`)
+  console.log(`[API] Токен в запросе: ${hasToken ? 'ДА' : 'НЕТ'}`)
+  if (hasToken) {
+    console.log(`[API] Authorization заголовок: Bearer ${token!.substring(0, 20)}...`)
+  }
   console.log(`[API] Full URL: ${url}`)
   console.log(`[API] Mode: ${import.meta.env.MODE} (DEV: ${import.meta.env.DEV}, PROD: ${import.meta.env.PROD})`)
   console.log(`[API] API_URL from env: ${import.meta.env.VITE_API_URL || 'not set (using auto-detected: ' + API_URL + ')'}`)
+  console.log(`[API] Все заголовки:`, Object.keys(headers))
 
   try {
     const res = await fetch(url, { ...options, headers })
+    console.log(`[API] ========================================`)
     console.log(`[API] Response: ${res.status} ${res.statusText}`)
     console.log(`[API] Response URL: ${res.url}`)
-    console.log(`[API] Response headers:`, Object.fromEntries(res.headers.entries()))
+    console.log(`[API] Токен был в запросе: ${hasToken ? 'ДА' : 'НЕТ'}`)
     
     if (!res.ok) {
       // Только при 401 (Unauthorized) удаляем токен и редиректим на логин
       // При других ошибках (502, 503, network errors) не удаляем токен,
       // чтобы пользователь мог видеть сообщение об ошибке подключения
       if (res.status === 401) {
+        console.error(`[API] ❌ 401 Unauthorized - запрос отклонен сервером`)
+        console.error(`[API] Токен был в запросе: ${hasToken ? 'ДА' : 'НЕТ'}`)
+        if (hasToken) {
+          console.error(`[API] Возможные причины:`)
+          console.error(`[API] 1. Токен истек`)
+          console.error(`[API] 2. Токен неверный или поврежден`)
+          console.error(`[API] 3. Пользователь не найден в БД`)
+          console.error(`[API] 4. Проблема с проверкой токена на сервере`)
+          console.error(`[API] Токен (первые 50 символов): ${token!.substring(0, 50)}...`)
+        } else {
+          console.error(`[API] Причина: Токен отсутствует в запросе!`)
+        }
+        console.error(`[API] Удаляем токен из localStorage и перенаправляем на логин`)
         localStorage.removeItem('token')
         if (window.location.pathname !== '/login') {
           window.location.href = '/login'
@@ -55,7 +86,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       
       // Специальная обработка 502 Bad Gateway
       if (res.status === 502) {
-        console.error(`[API] 502 Bad Gateway при запросе к ${url}`)
+        console.error(`[API] ❌ 502 Bad Gateway при запросе к ${url}`)
+        console.error(`[API] Токен был в запросе: ${hasToken ? 'ДА' : 'НЕТ'}`)
         console.error('[API] Возможные причины:')
         console.error('[API] 1. Бэкенд не запущен или упал')
         console.error('[API] 2. Nginx не может подключиться к бэкенду')
@@ -66,9 +98,13 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       
       // Обработка 503 Service Unavailable
       if (res.status === 503) {
-        console.error(`[API] 503 Service Unavailable при запросе к ${url}`)
+        console.error(`[API] ❌ 503 Service Unavailable при запросе к ${url}`)
+        console.error(`[API] Токен был в запросе: ${hasToken ? 'ДА' : 'НЕТ'}`)
         throw new Error('Сервис временно недоступен. Пожалуйста, попробуйте позже.')
       }
+      
+      console.error(`[API] ❌ Ошибка ${res.status} при запросе к ${url}`)
+      console.error(`[API] Токен был в запросе: ${hasToken ? 'ДА' : 'НЕТ'}`)
       
       let errorMessage = 'Ошибка запроса'
       try {
@@ -77,8 +113,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
           try {
             const data = JSON.parse(text)
             errorMessage = data.detail || data.message || errorMessage
+            console.error(`[API] Ошибка от сервера:`, errorMessage)
           } catch {
             errorMessage = text || errorMessage
+            console.error(`[API] Ошибка от сервера (текст):`, errorMessage.substring(0, 200))
           }
         }
       } catch {
@@ -86,6 +124,11 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       }
       throw new Error(errorMessage)
     }
+    
+    // Успешный ответ
+    console.log(`[API] ✅ Успешный ответ ${res.status}`)
+    console.log(`[API] Токен был в запросе: ${hasToken ? 'ДА' : 'НЕТ'}`)
+    
     const ct = res.headers.get('content-type') || ''
     let data: T
     
@@ -95,7 +138,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
         const text = await res.text()
         data = text ? JSON.parse(text) : (undefined as unknown as T)
       } catch (parseError) {
-        console.error(`[API] Failed to parse JSON response:`, parseError)
+        console.error(`[API] ❌ Failed to parse JSON response:`, parseError)
         // Если ответ успешный, но не JSON - возвращаем undefined
         data = undefined as unknown as T
       }
@@ -104,14 +147,19 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     }
     
     // Дополнительное логирование для отладки
-    console.log(`[API] Response data:`, data)
+    console.log(`[API] Response data type:`, typeof data)
     console.log(`[API] Response came from: ${res.url}`)
     if (res.url !== url) {
-      console.warn(`[API] WARNING: Response URL (${res.url}) differs from request URL (${url})!`)
+      console.warn(`[API] ⚠️ WARNING: Response URL (${res.url}) differs from request URL (${url})!`)
     }
+    console.log(`[API] ========================================`)
     
     return data
   } catch (error) {
+    console.error(`[API] ========================================`)
+    console.error(`[API] ❌ Исключение при выполнении запроса к ${url}`)
+    console.error(`[API] Токен был в запросе: ${hasToken ? 'ДА' : 'НЕТ'}`)
+    
     // Обработка сетевых ошибок (бэкенд недоступен)
     // НЕ удаляем токен при сетевых ошибках - пользователь авторизован, просто нет подключения
     if (
@@ -121,7 +169,10 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
        error.message.includes('NetworkError') ||
        error.message.includes('network'))
     ) {
-      console.error(`[API] Network error: Cannot connect to ${url}`)
+      console.error(`[API] ❌ Network error: Cannot connect to ${url}`)
+      console.error(`[API] Тип ошибки: TypeError (network error)`)
+      console.error(`[API] Сообщение: ${error.message}`)
+      console.error(`[API] Токен НЕ удаляется при сетевой ошибке (пользователь авторизован)`)
       throw new Error('Нет подключения к базе данных. Пожалуйста, попробуйте позже.')
     }
     // Обработка других сетевых ошибок
@@ -130,9 +181,15 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       error.message.includes('ERR_INTERNET_DISCONNECTED') ||
       error.message.includes('Network request failed')
     )) {
-      console.error(`[API] Network error: Cannot connect to ${url}`)
+      console.error(`[API] ❌ Network error: Cannot connect to ${url}`)
+      console.error(`[API] Тип ошибки: Network error`)
+      console.error(`[API] Сообщение: ${error.message}`)
+      console.error(`[API] Токен НЕ удаляется при сетевой ошибке (пользователь авторизован)`)
       throw new Error('Нет подключения к базе данных. Пожалуйста, попробуйте позже.')
     }
+    
+    console.error(`[API] Ошибка:`, error)
+    console.error(`[API] ========================================`)
     throw error
   }
 }
