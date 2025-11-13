@@ -108,40 +108,185 @@ async function tryAutoLoginIfNeeded() {
   }
 }
 
-// Слушаем postMessage от родительского окна Max (если открыто в iframe)
-if (window.parent !== window) {
-  console.log('[App] Приложение открыто в iframe, слушаем postMessage от Max...')
-  window.addEventListener('message', (event) => {
-    console.log('[App] Получено postMessage:', event.data)
-    console.log('[App] Origin:', event.origin)
-    
-    // Пробуем найти initData в сообщении
-    if (event.data && typeof event.data === 'object') {
-      if (event.data.initData) {
-        console.log('[App] ✅ Найден initData в postMessage!')
-        // Сохраняем во временное хранилище
-        sessionStorage.setItem('initData_from_postMessage', event.data.initData)
-        // Пробуем авторизоваться
-        tryAutoLoginIfNeeded()
-      } else if (event.data.user_id) {
-        console.log('[App] ✅ Найден user_id в postMessage, формируем initData...')
-        const initData = `user_id=${event.data.user_id}&first_name=${event.data.first_name || ''}&last_name=${event.data.last_name || ''}`
-        sessionStorage.setItem('initData_from_postMessage', initData)
-        tryAutoLoginIfNeeded()
-      }
-    } else if (typeof event.data === 'string' && (event.data.includes('user_id') || event.data.includes('initData'))) {
-      console.log('[App] ✅ Найдены данные в postMessage (строка)')
-      sessionStorage.setItem('initData_from_postMessage', event.data)
-      tryAutoLoginIfNeeded()
+// Функция для обработки initData из postMessage
+function handleInitDataFromPostMessage(initData: string, source: string) {
+  console.log(`[App] ✅ Получен initData из ${source}`)
+  console.log(`[App] initData (первые 100 символов):`, initData.substring(0, 100))
+  
+  // Сохраняем в sessionStorage для немедленного использования
+  try {
+    sessionStorage.setItem('initData_from_postMessage', initData)
+    console.log('[App] ✅ initData сохранен в sessionStorage')
+  } catch (e) {
+    console.warn('[App] ⚠️ Не удалось сохранить в sessionStorage:', e)
+  }
+  
+  // Также сохраняем в localStorage для последующих запусков
+  try {
+    localStorage.setItem('initData_saved', initData)
+    console.log('[App] ✅ initData сохранен в localStorage для последующих запусков')
+  } catch (e) {
+    console.warn('[App] ⚠️ Не удалось сохранить в localStorage:', e)
+  }
+  
+  // Пробуем авторизоваться немедленно
+  tryAutoLoginIfNeeded()
+}
+
+// Слушаем postMessage от родительского окна Max (всегда, не только в iframe)
+// Max может отправлять postMessage даже если не в iframe
+console.log('[App] Настраиваем обработчик postMessage...')
+console.log('[App] window.parent !== window:', window.parent !== window)
+
+// Обработчик postMessage событий
+const postMessageHandler = (event: MessageEvent) => {
+  console.log('[App] ========================================')
+  console.log('[App] 📨 Получено postMessage событие')
+  console.log('[App] Origin:', event.origin)
+  console.log('[App] Data type:', typeof event.data)
+  console.log('[App] Data:', event.data)
+  
+  // Проверяем различные форматы данных
+  if (!event.data) {
+    console.log('[App] ⚠️ postMessage без данных, пропускаем')
+    return
+  }
+  
+  // Формат 1: Объект с initData
+  if (typeof event.data === 'object' && event.data !== null) {
+    if (event.data.initData && typeof event.data.initData === 'string') {
+      console.log('[App] ✅ Найден initData в postMessage (объект)')
+      handleInitDataFromPostMessage(event.data.initData, 'postMessage (объект)')
+      return
     }
+    
+    // Формат 2: Объект с user_id и другими полями
+    if (event.data.user_id || event.data.userId || event.data.id) {
+      console.log('[App] ✅ Найден user_id в postMessage, формируем initData...')
+      const userId = event.data.user_id || event.data.userId || event.data.id
+      const firstName = event.data.first_name || event.data.firstName || event.data.firstname || ''
+      const lastName = event.data.last_name || event.data.lastName || event.data.lastname || ''
+      const username = event.data.username || event.data.userName || event.data.user || ''
+      
+      const initData = `user_id=${userId}${firstName ? `&first_name=${encodeURIComponent(firstName)}` : ''}${lastName ? `&last_name=${encodeURIComponent(lastName)}` : ''}${username ? `&username=${encodeURIComponent(username)}` : ''}`
+      handleInitDataFromPostMessage(initData, 'postMessage (user_id)')
+      return
+    }
+    
+    // Формат 3: Объект с вложенным user объектом
+    if (event.data.user && typeof event.data.user === 'object') {
+      const user = event.data.user
+      if (user.user_id || user.id) {
+        console.log('[App] ✅ Найден user объект в postMessage, формируем initData...')
+        const userId = user.user_id || user.id
+        const firstName = user.first_name || user.firstName || ''
+        const lastName = user.last_name || user.lastName || ''
+        const username = user.username || user.userName || ''
+        
+        const initData = `user_id=${userId}${firstName ? `&first_name=${encodeURIComponent(firstName)}` : ''}${lastName ? `&last_name=${encodeURIComponent(lastName)}` : ''}${username ? `&username=${encodeURIComponent(username)}` : ''}`
+        handleInitDataFromPostMessage(initData, 'postMessage (user объект)')
+        return
+      }
+    }
+    
+    // Формат 4: JSON строка в объекте
+    if (event.data.data && typeof event.data.data === 'string') {
+      try {
+        const parsed = JSON.parse(event.data.data)
+        if (parsed.user || parsed.user_id) {
+          console.log('[App] ✅ Найден JSON в postMessage.data, формируем initData...')
+          const userId = parsed.user?.user_id || parsed.user?.id || parsed.user_id || parsed.id
+          if (userId) {
+            const firstName = parsed.user?.first_name || parsed.first_name || ''
+            const lastName = parsed.user?.last_name || parsed.last_name || ''
+            const username = parsed.user?.username || parsed.username || ''
+            
+            const initData = `user_id=${userId}${firstName ? `&first_name=${encodeURIComponent(firstName)}` : ''}${lastName ? `&last_name=${encodeURIComponent(lastName)}` : ''}${username ? `&username=${encodeURIComponent(username)}` : ''}`
+            handleInitDataFromPostMessage(initData, 'postMessage (JSON data)')
+            return
+          }
+        }
+      } catch (e) {
+        // Не JSON, пробуем использовать как строку
+        console.log('[App] postMessage.data не является JSON, используем как строку')
+        if (event.data.data.includes('user_id') || event.data.data.includes('initData')) {
+          handleInitDataFromPostMessage(event.data.data, 'postMessage (data строка)')
+          return
+        }
+      }
+    }
+  }
+  
+  // Формат 5: Строка с initData или user_id
+  if (typeof event.data === 'string') {
+    if (event.data.includes('user_id') || event.data.includes('initData') || event.data.includes('init_data')) {
+      console.log('[App] ✅ Найдены данные в postMessage (строка)')
+      handleInitDataFromPostMessage(event.data, 'postMessage (строка)')
+      return
+    }
+    
+    // Пробуем распарсить как JSON
+    try {
+      const parsed = JSON.parse(event.data)
+      if (parsed.user || parsed.user_id || parsed.initData) {
+        console.log('[App] ✅ Найден JSON в postMessage (строка), формируем initData...')
+        if (parsed.initData) {
+          handleInitDataFromPostMessage(parsed.initData, 'postMessage (JSON initData)')
+          return
+        }
+        
+        const userId = parsed.user?.user_id || parsed.user?.id || parsed.user_id || parsed.id
+        if (userId) {
+          const firstName = parsed.user?.first_name || parsed.first_name || ''
+          const lastName = parsed.user?.last_name || parsed.last_name || ''
+          const username = parsed.user?.username || parsed.username || ''
+          
+          const initData = `user_id=${userId}${firstName ? `&first_name=${encodeURIComponent(firstName)}` : ''}${lastName ? `&last_name=${encodeURIComponent(lastName)}` : ''}${username ? `&username=${encodeURIComponent(username)}` : ''}`
+          handleInitDataFromPostMessage(initData, 'postMessage (JSON user)')
+          return
+        }
+      }
+    } catch (e) {
+      // Не JSON, пропускаем
+      console.log('[App] postMessage строка не является JSON или не содержит initData')
+    }
+  }
+  
+  console.log('[App] ⚠️ postMessage не содержит initData или user_id, пропускаем')
+  console.log('[App] ========================================')
+}
+
+// Добавляем обработчик postMessage
+// Слушаем всегда, не только в iframe, так как Max может отправлять postMessage разными способами
+window.addEventListener('message', postMessageHandler, false)
+console.log('[App] ✅ Обработчик postMessage добавлен')
+
+// Также добавляем обработчик на document для раннего перехвата событий
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    console.log('[App] DOM загружен, проверяем postMessage события...')
   })
+}
+
+// Дополнительно: запрашиваем initData у родительского окна (если в iframe)
+if (window.parent !== window) {
+  console.log('[App] Приложение открыто в iframe, запрашиваем initData у родителя...')
+  try {
+    // Отправляем сообщение родителю с запросом initData
+    window.parent.postMessage({ type: 'requestInitData' }, '*')
+    console.log('[App] ✅ Запрос initData отправлен родителю')
+  } catch (e) {
+    console.warn('[App] ⚠️ Не удалось отправить запрос родителю:', e)
+  }
 }
 
 // Слушаем изменения в Max WebApp SDK (если SDK загружается асинхронно)
 let lastInitData: string | null = null
 let checkSDKInterval: ReturnType<typeof setInterval> | null = null
 let checkSDKStartTime = Date.now()
-const MAX_SDK_CHECK_TIME = 20000 // 20 секунд для проверки SDK
+// Увеличено время ожидания SDK при первом запуске до 30 секунд
+const MAX_SDK_CHECK_TIME = 30000 // 30 секунд для проверки SDK при первом запуске
+const SDK_CHECK_INTERVAL = 200 // Проверяем каждые 200ms (чаще, чем раньше)
 
 // Функция для проверки SDK и остановки при необходимости
 function checkSDKAndStopIfNeeded() {
@@ -150,7 +295,7 @@ function checkSDKAndStopIfNeeded() {
       clearInterval(checkSDKInterval)
       checkSDKInterval = null
     }
-    console.log('[App] Токен получен, останавливаем проверку SDK')
+    console.log('[App] ✅ Токен получен, останавливаем проверку SDK')
     return true
   }
   
@@ -160,14 +305,45 @@ function checkSDKAndStopIfNeeded() {
       clearInterval(checkSDKInterval)
       checkSDKInterval = null
     }
-    console.log('[App] Остановлена проверка SDK (прошло 20 секунд)')
+    console.log(`[App] ⏱️ Остановлена проверка SDK (прошло ${Math.round(elapsed / 1000)} секунд)`)
     return true
   }
   
   return false
 }
 
+// Функция для обработки найденного initData из SDK
+function handleInitDataFromSDK(initData: string, source: string) {
+  if (initData === lastInitData) {
+    return // Уже обработали
+  }
+  
+  console.log(`[App] ✅ initData появился в SDK: ${source}`)
+  console.log(`[App] initData (первые 100 символов):`, initData.substring(0, 100))
+  lastInitData = initData
+  
+  // Сохраняем в sessionStorage для немедленного использования
+  try {
+    sessionStorage.setItem('initData_from_postMessage', initData)
+    console.log('[App] ✅ initData сохранен в sessionStorage')
+  } catch (e) {
+    console.warn('[App] ⚠️ Не удалось сохранить в sessionStorage:', e)
+  }
+  
+  // Также сохраняем в localStorage для последующих запусков
+  try {
+    localStorage.setItem('initData_saved', initData)
+    console.log('[App] ✅ initData сохранен в localStorage для последующих запусков')
+  } catch (e) {
+    console.warn('[App] ⚠️ Не удалось сохранить в localStorage:', e)
+  }
+  
+  // Пробуем авторизоваться немедленно
+  tryAutoLoginIfNeeded()
+}
+
 // Проверяем появление initData в SDK с интервалом
+console.log('[App] Запускаем проверку SDK с интервалом', SDK_CHECK_INTERVAL, 'ms')
 checkSDKInterval = setInterval(() => {
   if (checkSDKAndStopIfNeeded()) {
     return
@@ -178,27 +354,44 @@ checkSDKInterval = setInterval(() => {
                          w?.Telegram?.WebApp?.initData || 
                          w?.Max?.WebApp?.initData
   
-  // Также проверяем sessionStorage (может быть сохранен из postMessage)
-  const fromSessionStorage = sessionStorage.getItem('initData_from_postMessage')
-  
   if (currentInitData && currentInitData !== lastInitData) {
-    console.log('[App] ✅ initData появился в SDK!')
-    lastInitData = currentInitData
-    tryAutoLoginIfNeeded()
-  } else if (fromSessionStorage && fromSessionStorage !== lastInitData) {
-    console.log('[App] ✅ initData найден в sessionStorage (из postMessage)!')
-    lastInitData = fromSessionStorage
-    tryAutoLoginIfNeeded()
+    handleInitDataFromSDK(currentInitData, 'SDK объект')
+    return
   }
-}, 300) // Проверяем каждые 300ms (чаще, чем раньше)
+  
+  // Также проверяем sessionStorage (может быть сохранен из postMessage)
+  try {
+    const fromSessionStorage = sessionStorage.getItem('initData_from_postMessage')
+    if (fromSessionStorage && fromSessionStorage !== lastInitData) {
+      handleInitDataFromSDK(fromSessionStorage, 'sessionStorage (postMessage)')
+      return
+    }
+  } catch (e) {
+    // Игнорируем ошибки sessionStorage
+  }
+  
+  // Проверяем localStorage для сохраненного initData (если токена еще нет)
+  if (!localStorage.getItem('token')) {
+    try {
+      const savedInitData = localStorage.getItem('initData_saved')
+      if (savedInitData && savedInitData !== lastInitData) {
+        console.log('[App] ✅ Найден сохраненный initData в localStorage, используем для авторизации')
+        handleInitDataFromSDK(savedInitData, 'localStorage (сохраненный)')
+        return
+      }
+    } catch (e) {
+      // Игнорируем ошибки localStorage
+    }
+  }
+}, SDK_CHECK_INTERVAL)
 
 // Останавливаем проверку через максимальное время
 setTimeout(() => {
   if (checkSDKInterval) {
     clearInterval(checkSDKInterval)
     checkSDKInterval = null
+    console.log('[App] ⏱️ Остановлена проверка SDK (достигнут максимальный таймаут 30 секунд)')
   }
-  console.log('[App] Остановлена проверка SDK (достигнут максимальный таймаут)')
 }, MAX_SDK_CHECK_TIME)
 
 // НЕ вызываем autoLogin здесь - это будет сделано в ProtectedRoute или Login

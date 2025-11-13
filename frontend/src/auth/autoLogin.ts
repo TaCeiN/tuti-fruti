@@ -2,23 +2,72 @@
  * Ожидает загрузки Max WebApp SDK и получения initData
  * Делает повторные попытки с интервалом
  * Увеличено время ожидания для надежной работы с медленной загрузкой SDK
+ * Использует сохраненный initData из localStorage как fallback
  */
-async function waitForInitData(maxAttempts: number = 30, intervalMs: number = 500): Promise<string | null> {
+async function waitForInitData(maxAttempts: number = 60, intervalMs: number = 500): Promise<string | null> {
   const w = window as any
   
+  console.log(`[waitForInitData] Начинаем ожидание initData: ${maxAttempts} попыток по ${intervalMs}ms (всего до ${maxAttempts * intervalMs / 1000} секунд)`)
+  
+  // Сначала проверяем сохраненный initData
+  try {
+    const savedInitData = localStorage.getItem('initData_saved')
+    if (savedInitData) {
+      console.log('[waitForInitData] ✅ Найден сохраненный initData в localStorage, используем его')
+      return savedInitData
+    }
+  } catch (e) {
+    console.warn('[waitForInitData] Ошибка при чтении localStorage:', e)
+  }
+  
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    console.log(`[waitForInitData] Попытка ${attempt + 1}/${maxAttempts}`)
+    const attemptNumber = attempt + 1
+    const elapsed = attempt * intervalMs
+    const elapsedSeconds = Math.round(elapsed / 1000)
+    
+    if (attemptNumber % 10 === 0 || attemptNumber <= 5) {
+      // Логируем каждые 10 попыток или первые 5
+      console.log(`[waitForInitData] Попытка ${attemptNumber}/${maxAttempts} (прошло ${elapsedSeconds} секунд)`)
+    }
     
     // Проверяем все возможные источники
     const initData = getInitData()
     if (initData) {
-      console.log(`[waitForInitData] ✅ initData найден на попытке ${attempt + 1}`)
+      console.log(`[waitForInitData] ✅ initData найден на попытке ${attemptNumber} (через ${elapsedSeconds} секунд)`)
+      // Сохраняем для последующих запусков (если еще не сохранен)
+      try {
+        if (!localStorage.getItem('initData_saved')) {
+          localStorage.setItem('initData_saved', initData)
+          console.log('[waitForInitData] ✅ initData сохранен в localStorage')
+        }
+      } catch (e) {
+        console.warn('[waitForInitData] Не удалось сохранить initData:', e)
+      }
       return initData
     }
     
     // Проверяем, загружается ли SDK
     if (w?.MaxWebApp || w?.Telegram?.WebApp || w?.Max?.WebApp) {
-      console.log(`[waitForInitData] SDK обнаружен, но initData еще нет, ждем...`)
+      if (attemptNumber % 10 === 0) {
+        console.log(`[waitForInitData] SDK обнаружен, но initData еще нет, ждем... (попытка ${attemptNumber})`)
+      }
+    }
+    
+    // Также проверяем sessionStorage
+    try {
+      const fromSessionStorage = sessionStorage.getItem('initData_from_postMessage')
+      if (fromSessionStorage) {
+        console.log(`[waitForInitData] ✅ initData найден в sessionStorage на попытке ${attemptNumber}`)
+        // Сохраняем в localStorage
+        try {
+          localStorage.setItem('initData_saved', fromSessionStorage)
+        } catch (e) {
+          console.warn('[waitForInitData] Не удалось сохранить в localStorage:', e)
+        }
+        return fromSessionStorage
+      }
+    } catch (e) {
+      // Игнорируем ошибки sessionStorage
     }
     
     // Если это не последняя попытка, ждем перед следующей
@@ -27,7 +76,19 @@ async function waitForInitData(maxAttempts: number = 30, intervalMs: number = 50
     }
   }
   
-  console.log(`[waitForInitData] ❌ initData не найден после ${maxAttempts} попыток`)
+  console.log(`[waitForInitData] ❌ initData не найден после ${maxAttempts} попыток (${maxAttempts * intervalMs / 1000} секунд)`)
+  
+  // Финальная попытка: проверяем сохраненный initData еще раз
+  try {
+    const savedInitData = localStorage.getItem('initData_saved')
+    if (savedInitData) {
+      console.log('[waitForInitData] ✅ Используем сохраненный initData из localStorage как fallback')
+      return savedInitData
+    }
+  } catch (e) {
+    console.warn('[waitForInitData] Ошибка при финальной проверке localStorage:', e)
+  }
+  
   return null
 }
 
@@ -41,85 +102,250 @@ async function waitForInitData(maxAttempts: number = 30, intervalMs: number = 50
 function getInitData(): string | null {
   const w = window as any
   
-  console.log('[getInitData] Начинаем поиск initData...')
+  console.log('[getInitData] ========================================')
+  console.log('[getInitData] 🔍 Начинаем поиск initData...')
   console.log('[getInitData] window.location.href:', window.location.href)
   console.log('[getInitData] window.location.search:', window.location.search)
   console.log('[getInitData] window.location.hash:', window.location.hash)
+  
+  // 0. Проверяем localStorage для сохраненного initData (если был сохранен ранее)
+  try {
+    const savedInitData = localStorage.getItem('initData_saved')
+    if (savedInitData) {
+      console.log('[getInitData] ✅ Найден сохраненный initData в localStorage')
+      // Проверяем, не истек ли он (можно добавить проверку времени, но пока просто используем)
+      return savedInitData
+    }
+  } catch (e) {
+    console.warn('[getInitData] Ошибка при чтении localStorage:', e)
+  }
   
   // 1. Попытка получить из Max WebApp SDK
   console.log('[getInitData] Проверяем window.MaxWebApp:', w?.MaxWebApp)
   if (w?.MaxWebApp?.initData) {
     console.log('[getInitData] ✅ Найден в window.MaxWebApp.initData')
-    return w.MaxWebApp.initData
+    const initData = w.MaxWebApp.initData
+    // Сохраняем для последующих запусков
+    try {
+      localStorage.setItem('initData_saved', initData)
+    } catch (e) {
+      console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+    }
+    return initData
   }
   
   // Проверяем другие возможные пути к Max WebApp SDK
   if (w?.Telegram?.WebApp?.initData) {
     console.log('[getInitData] ✅ Найден в window.Telegram.WebApp.initData')
-    return w.Telegram.WebApp.initData
+    const initData = w.Telegram.WebApp.initData
+    try {
+      localStorage.setItem('initData_saved', initData)
+    } catch (e) {
+      console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+    }
+    return initData
   }
   
   if (w?.Max?.WebApp?.initData) {
     console.log('[getInitData] ✅ Найден в window.Max.WebApp.initData')
-    return w.Max.WebApp.initData
+    const initData = w.Max.WebApp.initData
+    try {
+      localStorage.setItem('initData_saved', initData)
+    } catch (e) {
+      console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+    }
+    return initData
   }
   
   // 1.5. Проверяем sessionStorage (может быть сохранен из postMessage)
-  const fromPostMessage = sessionStorage.getItem('initData_from_postMessage')
-  if (fromPostMessage) {
-    console.log('[getInitData] ✅ Найден в sessionStorage (из postMessage)')
-    return fromPostMessage
+  try {
+    const fromPostMessage = sessionStorage.getItem('initData_from_postMessage')
+    if (fromPostMessage) {
+      console.log('[getInitData] ✅ Найден в sessionStorage (из postMessage)')
+      // Также сохраняем в localStorage для последующих запусков
+      try {
+        localStorage.setItem('initData_saved', fromPostMessage)
+      } catch (e) {
+        console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+      }
+      return fromPostMessage
+    }
+  } catch (e) {
+    console.warn('[getInitData] Ошибка при чтении sessionStorage:', e)
   }
   
   // 2. Попытка получить из URL параметров (самый частый случай для Max)
   const urlParams = new URLSearchParams(location.search)
   
-  // Пробуем разные варианты названий параметров
-  let fromUrl = urlParams.get('initData') || 
-                urlParams.get('init_data') || 
-                urlParams.get('data') ||
-                urlParams.get('tgWebAppData') ||
-                urlParams.get('webAppData')
+  // Расширенный список возможных названий параметров
+  const possibleParamNames = [
+    'initData', 'init_data', 'data', 'tgWebAppData', 'webAppData',
+    'initdata', 'initDataRaw', 'initDataRaw', 'webapp_data', 'webappdata',
+    'tg_web_app_data', 'tgWebAppDataRaw', 'start_param'
+  ]
   
-  if (fromUrl) {
-    console.log('[getInitData] ✅ ✅ Найден в URL параметрах')
-    return decodeURIComponent(fromUrl)
-  }
-  
-  // 3. Попытка получить из hash
-  const hashParams = new URLSearchParams(location.hash.substring(1))
-  const fromHash = hashParams.get('initData') || hashParams.get('init_data') || hashParams.get('data')
-  if (fromHash) {
-    console.log('[getInitData] ✅ Найден в hash')
-    return decodeURIComponent(fromHash)
-  }
-  
-  // 4. Попытка получить из window.location (полный URL может содержать initData)
-  const fullUrl = window.location.href
-  const urlMatch = fullUrl.match(/[?&#](?:initData|init_data|data|tgWebAppData|webAppData)=([^&?#]+)/i)
-  if (urlMatch) {
-    console.log('[getInitData] ✅ Найден в полном URL через regex')
-    return decodeURIComponent(urlMatch[1])
-  }
-  
-  // 5. Пробуем найти в любых параметрах URL (может быть в другом формате)
-  const allParams = new URLSearchParams(fullUrl.split('?')[1] || '')
-  for (const [key, value] of allParams.entries()) {
-    const keyLower = key.toLowerCase()
-    if (keyLower.includes('init') || keyLower.includes('data') || keyLower.includes('webapp')) {
-      console.log(`[getInitData] Найден параметр ${key}, пробуем использовать...`)
-      return decodeURIComponent(value)
+  let fromUrl: string | null = null
+  for (const paramName of possibleParamNames) {
+    fromUrl = urlParams.get(paramName)
+    if (fromUrl) {
+      console.log(`[getInitData] ✅ Найден в URL параметре: ${paramName}`)
+      break
     }
   }
   
-  // 6. Проверяем, может быть данные переданы как часть query string без имени параметра
+  if (fromUrl) {
+    try {
+      const decoded = decodeURIComponent(fromUrl)
+      // Сохраняем для последующих запусков
+      try {
+        localStorage.setItem('initData_saved', decoded)
+      } catch (e) {
+        console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+      }
+      return decoded
+    } catch (e) {
+      console.warn('[getInitData] Ошибка при декодировании URL параметра:', e)
+      // Пробуем вернуть как есть
+      try {
+        localStorage.setItem('initData_saved', fromUrl)
+      } catch (e2) {
+        console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e2)
+      }
+      return fromUrl
+    }
+  }
+  
+  // 2.5. Проверяем все параметры URL более агрессивно
+  const fullUrl = window.location.href
+  const allUrlParams = new URLSearchParams(fullUrl.split('?')[1] || '')
+  console.log('[getInitData] Все параметры URL:', Array.from(allUrlParams.entries()))
+  
+  for (const [key, value] of allUrlParams.entries()) {
+    const keyLower = key.toLowerCase()
+    // Более широкий поиск
+    if (keyLower.includes('init') || 
+        keyLower.includes('data') || 
+        keyLower.includes('webapp') ||
+        keyLower.includes('web_app') ||
+        keyLower.includes('start')) {
+      console.log(`[getInitData] 🔍 Найден потенциальный параметр: ${key}=${value.substring(0, 50)}...`)
+      
+      // Пробуем распарсить как JSON, если похоже на JSON
+      if (value.trim().startsWith('{') || value.trim().startsWith('[')) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(value))
+          // Если это объект с пользователем, формируем initData
+          if (parsed.user || parsed.user_id) {
+            console.log('[getInitData] ✅ Обнаружен JSON объект с пользователем')
+            const userId = parsed.user?.user_id || parsed.user?.id || parsed.user_id || parsed.id
+            if (userId) {
+              const parts = [`user_id=${userId}`]
+              if (parsed.user?.first_name || parsed.first_name) {
+                parts.push(`first_name=${encodeURIComponent(parsed.user?.first_name || parsed.first_name)}`)
+              }
+              if (parsed.user?.last_name || parsed.last_name) {
+                parts.push(`last_name=${encodeURIComponent(parsed.user?.last_name || parsed.last_name)}`)
+              }
+              if (parsed.user?.username || parsed.username) {
+                parts.push(`username=${encodeURIComponent(parsed.user?.username || parsed.username)}`)
+              }
+              const constructed = parts.join('&')
+              console.log('[getInitData] ✅ Сформирован initData из JSON:', constructed)
+              try {
+                localStorage.setItem('initData_saved', constructed)
+              } catch (e) {
+                console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+              }
+              return constructed
+            }
+          }
+        } catch (e) {
+          // Не JSON, пробуем использовать как есть
+          console.log(`[getInitData] Параметр ${key} не является JSON, используем как есть`)
+        }
+      }
+      
+      // Используем значение как initData
+      try {
+        const decoded = decodeURIComponent(value)
+        console.log(`[getInitData] ✅ Используем параметр ${key} как initData`)
+        try {
+          localStorage.setItem('initData_saved', decoded)
+        } catch (e) {
+          console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+        }
+        return decoded
+      } catch (e) {
+        console.warn(`[getInitData] Ошибка при декодировании параметра ${key}:`, e)
+        try {
+          localStorage.setItem('initData_saved', value)
+        } catch (e2) {
+          console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e2)
+        }
+        return value
+      }
+    }
+  }
+  
+  // 3. Попытка получить из hash
+  try {
+    const hashParams = new URLSearchParams(location.hash.substring(1))
+    for (const paramName of possibleParamNames) {
+      const fromHash = hashParams.get(paramName)
+      if (fromHash) {
+        console.log(`[getInitData] ✅ Найден в hash параметре: ${paramName}`)
+        try {
+          const decoded = decodeURIComponent(fromHash)
+          try {
+            localStorage.setItem('initData_saved', decoded)
+          } catch (e) {
+            console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+          }
+          return decoded
+        } catch (e) {
+          try {
+            localStorage.setItem('initData_saved', fromHash)
+          } catch (e2) {
+            console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e2)
+          }
+          return fromHash
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[getInitData] Ошибка при чтении hash:', e)
+  }
+  
+  // 4. Попытка получить из window.location (полный URL может содержать initData)
+  const urlMatch = fullUrl.match(/[?&#](?:initData|init_data|data|tgWebAppData|webAppData|start_param)=([^&?#]+)/i)
+  if (urlMatch && urlMatch[1]) {
+    console.log('[getInitData] ✅ Найден в полном URL через regex')
+    try {
+      const decoded = decodeURIComponent(urlMatch[1])
+      try {
+        localStorage.setItem('initData_saved', decoded)
+      } catch (e) {
+        console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+      }
+      return decoded
+    } catch (e) {
+      try {
+        localStorage.setItem('initData_saved', urlMatch[1])
+      } catch (e2) {
+        console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e2)
+      }
+      return urlMatch[1]
+    }
+  }
+  
+  // 5. Проверяем, может быть данные переданы как часть query string без имени параметра
   // Например: ?user_id=123&first_name=John (прямые параметры пользователя)
-  const userId = urlParams.get('user_id') || urlParams.get('user_id')
+  const userId = urlParams.get('user_id') || urlParams.get('userId') || urlParams.get('id')
   if (userId) {
     console.log('[getInitData] Найден user_id в URL параметрах, формируем initData...')
-    const firstName = urlParams.get('first_name') || urlParams.get('first_name') || ''
-    const lastName = urlParams.get('last_name') || urlParams.get('last_name') || ''
-    const username = urlParams.get('username') || urlParams.get('username') || ''
+    const firstName = urlParams.get('first_name') || urlParams.get('firstName') || urlParams.get('firstname') || ''
+    const lastName = urlParams.get('last_name') || urlParams.get('lastName') || urlParams.get('lastname') || ''
+    const username = urlParams.get('username') || urlParams.get('userName') || urlParams.get('user') || ''
     
     // Формируем initData в формате URL-encoded
     const parts = [`user_id=${userId}`]
@@ -129,6 +355,11 @@ function getInitData(): string | null {
     
     const constructed = parts.join('&')
     console.log('[getInitData] ✅ Сформирован initData из URL параметров:', constructed)
+    try {
+      localStorage.setItem('initData_saved', constructed)
+    } catch (e) {
+      console.warn('[getInitData] Не удалось сохранить initData в localStorage:', e)
+    }
     return constructed
   }
   
@@ -138,6 +369,7 @@ function getInitData(): string | null {
     const kLower = k.toLowerCase()
     return kLower.includes('max') || kLower.includes('telegram') || kLower.includes('web')
   }))
+  console.log('[getInitData] ========================================')
   
   return null
 }
@@ -193,29 +425,52 @@ export async function autoLogin(waitForData: boolean = true): Promise<boolean> {
     // Если не найден и нужно ждать, делаем повторные попытки
     if (!initData && waitForData) {
       console.log('[autoLogin] ⚠️ initData не найден сразу, ожидаем загрузки SDK...')
-      // Увеличено до 30 попыток по 500ms = до 15 секунд для надежной работы с медленной загрузкой SDK
-      initData = await waitForInitData(30, 500)
+      // Увеличено до 60 попыток по 500ms = до 30 секунд для надежной работы с медленной загрузкой SDK
+      // Это должно быть достаточно для первого запуска, когда SDK загружается медленнее
+      initData = await waitForInitData(60, 500)
     }
     
-    // Для dev режима: если initData все еще не найден, пробуем использовать mock данные
+    // Если initData все еще не найден, пробуем использовать сохраненные данные
     if (!initData) {
       console.log('[autoLogin] ⚠️ initData не найден после ожидания')
-      console.log('[autoLogin] Пробуем использовать сохраненные данные для тестирования...')
+      console.log('[autoLogin] Пробуем использовать сохраненные данные...')
       
-      // Пробуем получить user_id из localStorage (если был сохранен ранее)
-      const savedUserId = localStorage.getItem('dev_user_id')
-      if (savedUserId) {
-        console.log('[autoLogin] ✅ Найден сохраненный dev_user_id:', savedUserId)
-        // Создаем mock initData с user_id в формате, который понимает бэкенд
-        initData = `user_id=${savedUserId}&first_name=Dev&last_name=User`
-        console.log('[autoLogin] Используем mock initData:', initData)
-      } else {
-        console.log('[autoLogin] ❌ initData не найден и нет сохраненного dev_user_id')
-        console.log('[autoLogin] Для тестирования:')
-        console.log('[autoLogin] 1. Откройте мини-приложение через Max бота, или')
-        console.log('[autoLogin] 2. В консоли выполните: localStorage.setItem("dev_user_id", "5107783")')
-        console.log('[autoLogin]    Затем перезагрузите страницу')
-        return false
+      // Сначала пробуем использовать сохраненный initData из localStorage
+      try {
+        const savedInitData = localStorage.getItem('initData_saved')
+        if (savedInitData) {
+          console.log('[autoLogin] ✅ Найден сохраненный initData в localStorage, используем его')
+          initData = savedInitData
+        }
+      } catch (e) {
+        console.warn('[autoLogin] Ошибка при чтении сохраненного initData:', e)
+      }
+      
+      // Если все еще нет initData, пробуем использовать mock данные для dev режима
+      if (!initData) {
+        console.log('[autoLogin] Сохраненный initData не найден, пробуем mock данные для dev режима...')
+        
+        // Пробуем получить user_id из localStorage (если был сохранен ранее)
+        const savedUserId = localStorage.getItem('dev_user_id')
+        if (savedUserId) {
+          console.log('[autoLogin] ✅ Найден сохраненный dev_user_id:', savedUserId)
+          // Создаем mock initData с user_id в формате, который понимает бэкенд
+          initData = `user_id=${savedUserId}&first_name=Dev&last_name=User`
+          console.log('[autoLogin] Используем mock initData:', initData)
+          // Сохраняем mock initData для последующих запусков
+          try {
+            localStorage.setItem('initData_saved', initData)
+          } catch (e) {
+            console.warn('[autoLogin] Не удалось сохранить mock initData:', e)
+          }
+        } else {
+          console.log('[autoLogin] ❌ initData не найден и нет сохраненного dev_user_id')
+          console.log('[autoLogin] Для тестирования:')
+          console.log('[autoLogin] 1. Откройте мини-приложение через Max бота, или')
+          console.log('[autoLogin] 2. В консоли выполните: localStorage.setItem("dev_user_id", "5107783")')
+          console.log('[autoLogin]    Затем перезагрузите страницу')
+          return false
+        }
       }
     }
     

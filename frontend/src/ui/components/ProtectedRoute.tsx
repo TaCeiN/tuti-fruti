@@ -45,17 +45,98 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
     console.log('[ProtectedRoute] Токена нет, запускаем autoLogin с ожиданием SDK...')
     let canceled = false
     let attemptCount = 0
-    const MAX_ATTEMPTS = 3 // Максимум 3 попытки
+    const MAX_ATTEMPTS = 5 // Увеличено до 5 попыток для первого запуска
+    let lastInitDataCheck: string | null = null
+    
+    // Проверяем наличие initData перед началом авторизации
+    const checkInitDataAvailable = (): boolean => {
+      try {
+        // Проверяем сохраненный initData
+        const savedInitData = localStorage.getItem('initData_saved')
+        if (savedInitData && savedInitData !== lastInitDataCheck) {
+          console.log('[ProtectedRoute] ✅ Найден сохраненный initData, можно начинать авторизацию')
+          lastInitDataCheck = savedInitData
+          return true
+        }
+        
+        // Проверяем sessionStorage
+        const fromSession = sessionStorage.getItem('initData_from_postMessage')
+        if (fromSession && fromSession !== lastInitDataCheck) {
+          console.log('[ProtectedRoute] ✅ Найден initData в sessionStorage, можно начинать авторизацию')
+          lastInitDataCheck = fromSession
+          return true
+        }
+        
+        // Проверяем SDK
+        const w = window as any
+        const fromSDK = w?.MaxWebApp?.initData || w?.Telegram?.WebApp?.initData || w?.Max?.WebApp?.initData
+        if (fromSDK && fromSDK !== lastInitDataCheck) {
+          console.log('[ProtectedRoute] ✅ Найден initData в SDK, можно начинать авторизацию')
+          lastInitDataCheck = fromSDK
+          return true
+        }
+        
+        // Проверяем URL параметры
+        const urlParams = new URLSearchParams(window.location.search)
+        const fromUrl = urlParams.get('initData') || urlParams.get('init_data') || urlParams.get('data') || urlParams.get('user_id')
+        if (fromUrl && fromUrl !== lastInitDataCheck) {
+          console.log('[ProtectedRoute] ✅ Найден initData в URL, можно начинать авторизацию')
+          lastInitDataCheck = fromUrl
+          return true
+        }
+        
+        return false
+      } catch (e) {
+        console.warn('[ProtectedRoute] Ошибка при проверке initData:', e)
+        return false
+      }
+    }
+    
+    // Функция для ожидания появления initData
+    const waitForInitDataAvailable = async (maxWaitTime: number = 5000): Promise<boolean> => {
+      const startTime = Date.now()
+      const checkInterval = 200 // Проверяем каждые 200ms
+      const maxAttempts = Math.floor(maxWaitTime / checkInterval)
+      
+      for (let i = 0; i < maxAttempts; i++) {
+        if (canceled) return false
+        
+        if (checkInitDataAvailable()) {
+          console.log(`[ProtectedRoute] ✅ initData появился через ${(Date.now() - startTime) / 1000} секунд`)
+          return true
+        }
+        
+        if (i < maxAttempts - 1) {
+          await new Promise(resolve => setTimeout(resolve, checkInterval))
+        }
+      }
+      
+      console.log(`[ProtectedRoute] ⚠️ initData не появился за ${maxWaitTime / 1000} секунд`)
+      return false
+    }
     
     const tryAuth = async () => {
       if (canceled) return
       
       attemptCount++
+      console.log(`[ProtectedRoute] ========================================`)
       console.log(`[ProtectedRoute] Попытка авторизации ${attemptCount}/${MAX_ATTEMPTS}`)
+      
+      // Перед авторизацией ждем появления initData (до 5 секунд для каждой попытки)
+      if (attemptCount === 1) {
+        console.log('[ProtectedRoute] Первая попытка: ожидаем появления initData...')
+        const initDataAvailable = await waitForInitDataAvailable(5000)
+        if (!initDataAvailable) {
+          console.log('[ProtectedRoute] initData не появился, но продолжаем попытку авторизации...')
+        }
+      } else {
+        // Для последующих попыток ждем меньше
+        await waitForInitDataAvailable(2000)
+      }
       
       try {
         console.log('[ProtectedRoute] Вызываем autoLogin() с waitForData=true...')
-        // Ждем загрузки SDK и initData (до 15 секунд)
+        // Ждем загрузки SDK и initData (до 30 секунд)
         const ok = await autoLogin(true)
         console.log('[ProtectedRoute] autoLogin() вернул:', ok)
         
@@ -80,36 +161,37 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
                   if (finalToken) {
                     setToken(finalToken)
                     setChecking(false)
+                    setFailed(false)
                   }
                 }
-              }, 200)
+              }, 300)
             } else {
               console.error('[ProtectedRoute] ❌ ОШИБКА: Токен не найден после успешной авторизации!')
               // Если это не последняя попытка, пробуем еще раз
               if (attemptCount < MAX_ATTEMPTS) {
-                console.log('[ProtectedRoute] Повторная попытка через 1 секунду...')
+                console.log('[ProtectedRoute] Повторная попытка через 2 секунды...')
                 setTimeout(() => {
                   if (!canceled) {
                     tryAuth()
                   }
-                }, 1000)
+                }, 2000)
               } else {
                 setChecking(false)
                 setFailed(true)
               }
             }
           } else {
-            // Если это не последняя попытка, пробуем еще раз через 1 секунду
+            // Если это не последняя попытка, пробуем еще раз
             if (attemptCount < MAX_ATTEMPTS) {
-              console.log('[ProtectedRoute] Повторная попытка через 1 секунду...')
+              console.log(`[ProtectedRoute] autoLogin не удался, повторная попытка через 2 секунды... (${attemptCount + 1}/${MAX_ATTEMPTS})`)
               setTimeout(() => {
                 if (!canceled) {
                   tryAuth()
                 }
-              }, 1000)
+              }, 2000)
             } else {
               // Все попытки исчерпаны
-              console.log('[ProtectedRoute] Все попытки исчерпаны, устанавливаем failed=true')
+              console.log('[ProtectedRoute] ❌ Все попытки исчерпаны, устанавливаем failed=true')
               setChecking(false)
               setFailed(true)
             }
@@ -120,12 +202,12 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
         if (!canceled) {
           // Если это не последняя попытка, пробуем еще раз
           if (attemptCount < MAX_ATTEMPTS) {
-            console.log('[ProtectedRoute] Повторная попытка через 1 секунду после ошибки...')
+            console.log('[ProtectedRoute] Повторная попытка через 2 секунды после ошибки...')
             setTimeout(() => {
               if (!canceled) {
                 tryAuth()
               }
-            }, 1000)
+            }, 2000)
           } else {
             setChecking(false)
             setFailed(true)
@@ -134,8 +216,13 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
       }
     }
     
-    // Начинаем первую попытку
-    tryAuth()
+    // Небольшая задержка перед первой попыткой, чтобы дать время SDK загрузиться
+    console.log('[ProtectedRoute] Ожидание 500ms перед началом авторизации...')
+    setTimeout(() => {
+      if (!canceled) {
+        tryAuth()
+      }
+    }, 500)
     
     return () => { canceled = true }
   }, [])
