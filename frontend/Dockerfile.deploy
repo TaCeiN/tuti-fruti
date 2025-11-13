@@ -15,6 +15,12 @@ RUN npm ci
 # Копируем исходный код
 COPY . .
 
+# Проверяем, что файл faq.ts скопирован (для отладки)
+RUN test -f src/ui/data/faq.ts && echo "✅ faq.ts found" || echo "❌ faq.ts NOT found" && ls -la src/ui/data/ || true
+
+# Делаем deploy.sh исполняемым
+RUN chmod +x /app/deploy.sh
+
 # Аргументы для деплоя (передаются при сборке)
 ARG VITE_API_URL
 ARG GITHUB_REPO=tacein/tacein.github.io
@@ -27,10 +33,6 @@ ENV GITHUB_REPO=${GITHUB_REPO}
 ENV GITHUB_USER=${GITHUB_USER}
 ENV GITHUB_EMAIL=${GITHUB_EMAIL}
 # GITHUB_TOKEN передается только через environment, не через ARG (безопасность)
-
-# Копируем скрипт деплоя
-COPY deploy.sh /app/deploy.sh
-RUN chmod +x /app/deploy.sh
 
 # Запускаем деплой (GITHUB_TOKEN будет передан через environment)
 CMD ["/app/deploy.sh"]
