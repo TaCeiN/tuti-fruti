@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getUserSettings, updateUserSettings, UserSettings } from '../../api/client'
-import { faqData, privacyPolicy, termsOfService } from '../data/faq'
+import { faqData, privacyPolicy, termsOfService, type FAQItem } from '../data/faq'
 
 export default function Settings() {
   const queryClient = useQueryClient()
@@ -150,7 +150,7 @@ export default function Settings() {
         <div className="settings-section">
           <h2 className="settings-section-title">Часто задаваемые вопросы</h2>
           <div className="faq-list">
-            {faqData[language].map((item, index) => (
+            {faqData[language].map((item: FAQItem, index: number) => (
               <div key={index} className="faq-item">
                 <button
                   className="faq-question"
